@@ -1,0 +1,100 @@
+{
+  "payloads": [
+    {
+      "ContainerId": "53f897ad422121a450c84796e2192fd25c2d758c1d1a17069f2601dadb83908d",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "f5c45e6246c1ce19dcfe6e427d4e29e7",
+        "SpanID": "c2324e0652b42248",
+        "TraceOptions": 1
+      },
+      "ProcessId": 1156
+    },
+    {
+      "ContainerId": "53f897ad422121a450c84796e2192fd25c2d758c1d1a17069f2601dadb83908d",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "c6bfb956ed40b802c41f9a02d652f373",
+        "SpanID": "1f16bf3ccf7bd5aa",
+        "TraceOptions": 1
+      }
+    },
+    {
+      "ContainerId": "00000000-0000-0000-0000-000000000000",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "c6bfb956ed40b802c41f9a02d652f373",
+        "SpanID": "0b98ffa4cdedcd07",
+        "TraceOptions": 1
+      },
+      "Request": {
+        "RequestType": "Remove",
+        "ResourceType": "CombinedLayers",
+        "Settings": {
+          "ContainerRootPath": "c:\\mounts\\scsi\\m0"
+        }
+      }
+    },
+    {
+      "ContainerId": "00000000-0000-0000-0000-000000000000",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "c6bfb956ed40b802c41f9a02d652f373",
+        "SpanID": "7cf92f734c43880d",
+        "TraceOptions": 1
+      },
+      "Request": {
+        "RequestType": "Remove",
+        "ResourceType": "MappedVirtualDisk",
+        "Settings": {
+          "ContainerPath": "c:\\mounts\\scsi\\m0",
+          "Lun": 1
+        }
+      }
+    },
+    {
+      "ContainerId": "00000000-0000-0000-0000-000000000000",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "cd4183f7f349e44da11c7467474f0ccd",
+        "SpanID": "fa45d3184228d7e9",
+        "TraceOptions": 1
+      },
+      "Request": {
+        "RequestType": "Remove",
+        "Settings": {
+          "AdapterId": "1d1886c5-466c-46eb-b798-ecd7467d4834",
+          "RequestType": "Remove"
+        }
+      }
+    },
+    {
+      "ContainerId": "00000000-0000-0000-0000-000000000000",
+      "ActivityId": "00000000-0000-0000-0000-000000000000",
+      "ocsc": {
+        "TraceID": "cd4183f7f349e44da11c7467474f0ccd",
+        "SpanID": "e6c71381409acf46",
+        "TraceOptions": 1
+      },
+      "Request": {
+        "RequestType": "Remove",
+        "ResourceType": "NetworkNamespace",
+        "Settings": {
+          "ID": "66199a6c-8208-494e-a630-f8955cd76ab6",
+          "Resources": [
+            {
+              "Type": "Endpoint",
+              "Data": {
+                "Id": "7AE81782-3366-43E2-BBBC-34F4D79544CC"
+              }
+            }
+          ],
+          "SchemaVersion": {
+            "Major": 2,
+            "Minor": 0
+          }
+        }
+      }
+    }
+  ]
+}
