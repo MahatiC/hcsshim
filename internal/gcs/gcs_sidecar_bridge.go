@@ -87,3 +87,33 @@ func (b *Bridge) deleteContainerStateV2(r *Request) (_ RequestResponse, err erro
 func (b *Bridge) modifySettingsV2(r *Request) (_ RequestResponse, err error) {
 	// TODO: Call into modifySettings and enforce policy
 }
+
+// API for Supportive functions for bridge events
+func (h *Host) CreateContainer(ctx context.Context, id string, settings *prot.VMHostedContainerSettingsV2) (_ *Container, err error) {
+}
+
+func (h *Host) ExecProcess(ctx context.Context, containerID string, params prot.ProcessParameters, conSettings stdio.ConnectionSettings) (_ int, err error) {
+}
+
+func (h *Host) ShutdownContainer(ctx context.Context, containerID string, graceful bool) error {
+	// TODO: EnforceShutdownContainerPolicy and pass the request to inbox GCS if allowed
+	// TODO: Maintain UVM/Container state in gcs-sidecar 
+	c, err := h.GetCreatedContainer(containerID)
+}
+
+// Shutdown terminates this UVM. This is a destructive call and will destroy all
+// state that has not been cleaned before calling this function.
+func (*Host) Shutdown() {
+}
+
+func (h *Host) SignalContainerProcess(ctx context.Context, containerID string, processID uint32, signal syscall.Signal) error {
+	// TODO: Maintain UVM/Container state in gcs-sidecar 
+	// TODO: EnforceSignalContainerProcessPolicy
+	c, err := h.GetCreatedContainer(containerID)
+}
+
+func (h *Host) GetProperties(ctx context.Context, containerID string, query prot.PropertyQuery) (*prot.PropertiesV2, error) {
+}
+
+func (h *Host) GetStacks(ctx context.Context) (string, error) {
+}
