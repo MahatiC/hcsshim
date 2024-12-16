@@ -1,3 +1,5 @@
+//go: build windows
+
 package main
 
 import (
@@ -13,6 +15,9 @@ import (
 	"github.com/Microsoft/hcsshim/internal/gcs"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/debug"
+
+	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
+	"github.com/Microsoft/hcsshim/internal/guest/prot"
 )
 
 const maxMsgSize = 0x10000
@@ -70,6 +75,13 @@ func recvFromShimAndForward(hcsshimCon *winio.HvsockConn, gcsCon net.Conn, wg *s
 			log.Printf("Error reading from hcsshim: %v", err)
 			return
 		}
+		// TODO: Plumbing to receive Bridge events and process along the lines of:
+		// 1) similar to func (b *Bridge) ListenAndServe(bridgeIn io.ReadCloser, bridgeOut io.WriteCloser) error
+		// 2) Call into "AssignHandlers"
+
+		// set up our initial stance policy enforcer
+		var initialEnforcer securitypolicy.SecurityPolicyEnforcer
+		initialEnforcer = &securitypolicy.OpenDoorSecurityPolicyEnforcer{}
 
 		str := string(buffer[:length])
 		fmt.Printf("Received len %v from shim: %s\n", length, str)
