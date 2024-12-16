@@ -117,3 +117,64 @@ func (h *Host) GetProperties(ctx context.Context, containerID string, query prot
 
 func (h *Host) GetStacks(ctx context.Context) (string, error) {
 }
+
+//API for handling modifySettings requests for container and UVM
+
+func (h *Host) ModifySettings(ctx context.Context, containerID string, req *guestrequest.ModificationRequest) error {
+	if containerID == UVMContainerID {
+		return h.modifyHostSettings(ctx, containerID, req)
+	}
+	return h.modifyContainerSettings(ctx, containerID, req)
+}
+
+func (h *Host) modifyHostSettings(ctx context.Context, containerID string, req *guestrequest.ModificationRequest) (err error) {
+}
+
+func (h *Host) modifyContainerSettings(ctx context.Context, containerID string, req *guestrequest.ModificationRequest) error {
+}
+
+func modifySCSIDevice(
+	ctx context.Context,
+	rt guestrequest.RequestType,
+	msd *guestresource.SCSIDevice,
+) error {
+}
+
+func modifyMappedVirtualDisk(
+	ctx context.Context,
+	rt guestrequest.RequestType,
+	mvd *guestresource.LCOWMappedVirtualDisk,
+	securityPolicy securitypolicy.SecurityPolicyEnforcer,
+) (err error) {
+}
+
+func modifyMappedDirectory(
+	ctx context.Context,
+	vsock transport.Transport,
+	rt guestrequest.RequestType,
+	md *guestresource.WCOWMappedDirectory,
+	securityPolicy securitypolicy.SecurityPolicyEnforcer,
+) (err error) {
+}
+
+func modifyMappedVPMemDevice(ctx context.Context,
+	rt guestrequest.RequestType,
+	vpd *guestresource.LCOWMappedVPMemDevice,
+	securityPolicy securitypolicy.SecurityPolicyEnforcer,
+) (err error) {
+}
+
+func modifyMappedVPCIDevice(ctx context.Context, rt guestrequest.RequestType, vpciDev *guestresource.LCOWMappedVPCIDevice) error {
+}
+
+func modifyCombinedLayers(
+	ctx context.Context,
+	rt guestrequest.RequestType,
+	cl *guestresource.LCOWCombinedLayers,
+	scratchEncrypted bool,
+	securityPolicy securitypolicy.SecurityPolicyEnforcer,
+) (err error) {
+}
+
+func modifyNetwork(ctx context.Context, rt guestrequest.RequestType, na *guestresource.LCOWNetworkAdapter) (err error) {
+}
