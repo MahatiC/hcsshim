@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/Microsoft/hcsshim/cmd/gcs-sidecar/windowssecuritypolicy"
 )
 
 /*
@@ -117,7 +118,7 @@ func testEnforcer(expectedReturn bool) bool {
 
 func (b *Bridge) negotiateProtocol(req *request) error {
 	// Do something
-	expectedReturn := false
+	expectedReturn := true
 	// TESTING ONLY: being used to test err case during dev
 	if testEnforcer(expectedReturn) {
 		return nil
@@ -139,6 +140,59 @@ func (b *Bridge) negotiateProtocol(req *request) error {
 
 		return fmt.Errorf("request %v not allowed", req.typ.String())
 	}
+}
+
+func (b *Bridge) SetConfidentialUVMOptions(r *WCOWConfidentialOptions) error {
+	/*
+	b.policyMutex.Lock()
+	defer b.policyMutex.Unlock()
+	if b.securityPolicyEnforcerSet {
+		return errors.New("security policy has already been set")
+	}
+		*/
+	// this limit ensures messages are below the character truncation limit that
+	// can be imposed by an orchestrator
+	maxErrorMessageLength := 3 * 1024
+
+	// Initialize security policy enforcer for a given enforcer type and
+	// encoded security policy.
+	_, err := windowssecuritypolicy.CreateSecurityPolicyEnforcer(
+		r.EnforcerType,
+		r.EncodedSecurityPolicy,
+		DefaultCRIMounts(),
+		DefaultCRIPrivilegedMounts(),
+		maxErrorMessageLength,
+	)
+	if err != nil {
+		return err
+	}
+
+	// This is one of two points at which we might change our logging.
+	// At this time, we now have a policy and can determine what the policy
+	// author put as policy around runtime logging.
+	// The other point is on startup where we take a flag to set the default
+	// policy enforcer to use before a policy arrives. After that flag is set,
+	// we use the enforcer in question to set up logging as well.
+	/*if err = p.EnforceRuntimeLoggingPolicy(ctx); err == nil {
+		//logrus.SetOutput(h.logWriter)
+	} else {
+		//logrus.SetOutput(io.Discard)
+	}
+
+	hostData, err := securitypolicy.NewSecurityPolicyDigest(r.EncodedSecurityPolicy)
+	if err != nil {
+		return err
+	}*/
+/*
+	if err := validateHostData(hostData[:]); err != nil {
+		return err
+	}
+
+	b.securityPolicyEnforcer = p
+	b.securityPolicyEnforcerSet = true
+	b.uvmReferenceInfo = r.EncodedUVMReference
+*/
+	return nil
 }
 
 func (b *Bridge) dumpStacks(req *request) error {

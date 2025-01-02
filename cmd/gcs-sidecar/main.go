@@ -61,16 +61,6 @@ func acceptAndClose(ctx context.Context, l net.Listener) (net.Conn, error) {
 	return nil, err
 }
 
-/*
-	func startSendAndRecvLoops(shimCon *winio.HvsockConn, gcsCon net.Conn) {
-		var wg sync.WaitGroup
-		wg.Add(2)
-		defer wg.Wait()
-
-		go recvFromShimAndForward(shimCon, gcsCon, &wg)
-		go recvFromGcsAndForward(gcsCon, shimCon, &wg)
-	}
-*/
 func (m *handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
@@ -147,32 +137,6 @@ func main() {
 	defer f.Close()
 
 	log.SetOutput(f)
-
-	/*
-		type srvResp struct {
-			err error
-		}
-
-		chsrv := make(chan error)
-		go func() {
-			defer close(chsrv)
-
-			if err := runService("gcs-sidecar", false); err != nil {
-				log.Fatalf("error starting gcs-sidecar service: %v", err)
-			}
-
-			chsrv <- err
-		}()
-
-		select {
-		// case <-ctx.Done():
-		//	return ctx.Err()
-		case r := <-chsrv:
-			if r != nil {
-				log.Fatal(r)
-			}
-		}
-	*/
 
 	// take in the uvm id as args
 	if len(os.Args) != 2 {
