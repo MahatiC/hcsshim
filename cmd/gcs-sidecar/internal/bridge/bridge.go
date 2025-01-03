@@ -24,7 +24,7 @@ import (
 // - b.quitCh is to be used if stop/shutdownContainer validation fails only right?
 // - cherry pick commit to add annotations for securityPolicy
 // - shimdiag.exe exec uvmID
-
+// TODO: Do we need to support schema1 request types?
 type requestMessage interface {
 	Base() *requestBase
 }
@@ -33,6 +33,7 @@ type responseMessage interface {
 	Base() *responseBase
 }
 
+/*
 // rpc represents an outstanding rpc request to the guest
 type rpc struct {
 	proc    rpcProc
@@ -42,7 +43,7 @@ type rpc struct {
 	brdgErr error // error encountered when sending the request or unmarshaling the result
 	ch      chan struct{}
 }
-
+*/
 // TODO: 'B'ridge to 'b'ridge
 type Bridge struct {
 	shimConn     io.ReadWriteCloser
@@ -170,7 +171,7 @@ func (b *Bridge) AssignHandlers() {
 	b.HandleFunc(rpcStart, b.startContainer)
 	b.HandleFunc(rpcShutdownGraceful, b.shutdownGraceful)
 	b.HandleFunc(rpcShutdownForced, b.shutdownForced)
-	b.HandleFunc(rpcExecuteProcess, b.createProcess)
+	b.HandleFunc(rpcExecuteProcess, b.executeProcess)
 	b.HandleFunc(rpcWaitForProcess, b.waitForProcess)
 	b.HandleFunc(rpcSignalProcess, b.signalProcess)
 	b.HandleFunc(rpcResizeConsole, b.resizeConsole)
