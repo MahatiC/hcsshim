@@ -10,7 +10,6 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Microsoft/hcsshim/cmd/gcs-sidecar/internal/hcs/schema1"
 	hcsschema "github.com/Microsoft/hcsshim/cmd/gcs-sidecar/internal/hcs/schema2"
 	"github.com/Microsoft/hcsshim/cmd/gcs-sidecar/internal/hcs/schema2/resourcepaths"
 	"github.com/Microsoft/hcsshim/cmd/gcs-sidecar/internal/protocol/guestrequest"
@@ -84,6 +83,13 @@ func (b *Bridge) shutdownGraceful(req *request) error {
 	}
 	log.Printf("rpcShutdownGraceful: \n requestBase: %v", r)
 
+	/*
+		containerdID := r.ContainerdID
+		b.securityPolicyEnforcer.EnforceShutdownContainerPolicy(ctx, containerID)
+		if err != nil {
+			return fmt.Errorf("rpcShudownGraceful operation not allowed: %v", err)
+		}
+	*/
 	return nil
 }
 
@@ -94,6 +100,14 @@ func (b *Bridge) shutdownForced(req *request) error {
 	}
 	log.Printf("rpcShutdownForced: \n requestBase: %v", r)
 
+	/*
+		containerdID := r.ContainerdID
+		b.securityPolicyEnforcer.EnforceShutdownContainerPolicy(ctx, containerID)
+		if err != nil {
+			return fmt.Errorf("rpcShudownGraceful operation not allowed: %v", err)
+		}
+	*/
+
 	return nil
 }
 
@@ -102,15 +116,21 @@ func (b *Bridge) executeProcess(req *request) error {
 	if err := json.Unmarshal(req.message, &r); err != nil {
 		return fmt.Errorf("failed to unmarshal rpcExecuteProcess: %v", req)
 	}
+	containerID := r.requestBase.ContainerID
 	stdioRelaySettings := r.Settings.StdioRelaySettings
 	vsockStdioRelaySettings := r.Settings.VsockStdioRelaySettings
 
 	switch processParams := r.Settings.ProcessParameters.Value.(type) {
-	case schema1.ProcessConfig:
-		log.Printf("rpcExecProcess: \n schema1.ProcessConfig{ params: %v, stdioRelaySettings: %v, vsockStdioRelaySettings: %v }", processParams, stdioRelaySettings, vsockStdioRelaySettings)
 	// internal/cmd/cmd.go:142
 	case hcsschema.ProcessParameters:
-		log.Printf("rpcExecProcess: \n schema1.ProcessParameters{ params: %v, stdioRelaySettings: %v, vsockStdioRelaySettings: %v }", processParams, stdioRelaySettings, vsockStdioRelaySettings)
+		log.Printf("rpcExecProcess: \n containerID: %v, schema1.ProcessParameters{ params: %v, stdioRelaySettings: %v, vsockStdioRelaySettings: %v }", containerID, processParams, stdioRelaySettings, vsockStdioRelaySettings)
+		/*
+			pid, err := execProcess(ctx, request.ContainerID, params, // conSettings)
+			if err != nil {
+				return nil, err
+			}
+			log
+		*/
 	default:
 		log.Printf("rpcExecProcess: invalid params type for request %v", r.Settings)
 	}
@@ -125,6 +145,7 @@ func (b *Bridge) waitForProcess(req *request) error {
 	}
 	log.Printf("rpcWaitForProcess: \n containerWaitForProcess{ requestBase: %v, processID: %v, timeoutInMs: %v }", r.requestBase, r.ProcessID, r.TimeoutInMs)
 
+	// waitForProcess does not have enforcer in clcow, why?
 	return nil
 }
 
@@ -137,6 +158,12 @@ func (b *Bridge) signalProcess(req *request) error {
 	switch opts := r.Options.(type) {
 	case guestresource.SignalProcessOptionsWCOW:
 		log.Printf("rpcSignalProcess: \n containerSignalProcess{ requestBase: %v, processID: %v, Options: %v }", r.requestBase, r.ProcessID, opts)
+
+		err := signalProcess(r.ContainerID, r.ProcessID, opts.Signal)
+		if err != nil {
+			return fmt.Errorf("waitForProcess not allowed due to policy")
+		}
+
 	default:
 		log.Printf("rpcSignalProcess: invalid Options type for request %v", r)
 	}
@@ -149,7 +176,12 @@ func (b *Bridge) resizeConsole(req *request) error {
 	if err := json.Unmarshal(req.message, &r); err != nil {
 		return fmt.Errorf("failed to unmarshal rpcSignalProcess: %v", req)
 	}
-	log.Printf("rpcResizeConsole: \n containerResizeConsole{ requestBase: %v, processID: %v, height: %v, width: %v }", r.requestBase, r.ProcessID, r.Width)
+	log.Printf("rpcResizeConsole: \n containerResizeConsole{ requestBase: %v, processID: %v, height: %v, width: %v }", r.requestBase, r.ProcessID, r.Height, r.Width)
+
+	err := resizeConsole(r.ContainerID, r.Height, r.Width)
+	if err != nil {
+		return fmt.Errorf("waitForProcess not allowed due to policy")
+	}
 
 	return nil
 }
