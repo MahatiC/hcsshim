@@ -310,6 +310,123 @@ const (
 
 // uVM NUMA annotations.
 const (
+	// NetworkConfigProxy holds the address of the network config proxy service.
+	// If set, network setup will be attempted via ncproxy.
+	NetworkConfigProxy = "io.microsoft.network.ncproxy"
+
+	// NcproxyContainerID indicates whether or not to use the hcsshim container ID
+	// when setting up ncproxy and computeagent.
+	NcproxyContainerID = "io.microsoft.network.ncproxy.containerid"
+
+	// EncryptedScratchDisk indicates whether or not the container scratch disks
+	// should be encrypted or not.
+	EncryptedScratchDisk = "io.microsoft.virtualmachine.storage.scratch.encrypted"
+
+	// SecurityPolicy is used to specify a security policy for opengcs to enforce.
+	SecurityPolicy = "io.microsoft.virtualmachine.lcow.securitypolicy"
+
+	// SecurityPolicyEnforcer is used to specify which enforcer to initialize (open-door, standard or rego).
+	// This allows for better fallback mechanics.
+	SecurityPolicyEnforcer = "io.microsoft.virtualmachine.lcow.enforcer"
+
+	// WCOW SecurityPolicy is used to specify a security policy for opengcs to enforce.
+	WCOWSecurityPolicy = "io.microsoft.virtualmachine.wcow.securitypolicy"
+
+	// WCOW SecurityPolicyEnforcer is used to specify which enforcer to initialize (open-door, standard or rego).
+	// This allows for better fallback mechanics.
+	WCOWSecurityPolicyEnforcer = "io.microsoft.virtualmachine.wcow.enforcer"
+
+	// HclEnabled specifies whether to enable the host compatibility layer.
+	HclEnabled = "io.microsoft.virtualmachine.lcow.hcl-enabled"
+
+	// ContainerProcessDumpLocation specifies a path inside of containers to save process dumps to. As
+	// the scratch space for a container is generally cleaned up after exit, this is best set to a volume mount of
+	// some kind (vhd, bind mount, fileshare mount etc.)
+	ContainerProcessDumpLocation = "io.microsoft.container.processdumplocation"
+
+	// WCOWProcessDumpType specifies the type of dump to create when generating a local user mode
+	// process dump for Windows containers. The supported options are "mini", and "full".
+	// See DumpType: https://docs.microsoft.com/en-us/windows/win32/wer/collecting-user-mode-dumps
+	WCOWProcessDumpType = "io.microsoft.wcow.processdumptype"
+
+	// WCOWProcessDumpCount specifies the maximum number of dumps to be collected in the specified
+	// ContainerProcessDumpLocation path. When the maximum value is exceeded, the oldest dump file in the
+	// folder will be replaced by the new dump file. The default value is 10.
+	WCOWProcessDumpCount = "io.microsoft.wcow.processdumpcount"
+
+	// RLimitCore specifies the core rlimit value for a container. This will need to be set
+	// in order to have core dumps generated for a given container.
+	RLimitCore = "io.microsoft.lcow.rlimitcore"
+
+	// LCOWDevShmSizeInKb specifies the size of LCOW /dev/shm.
+	LCOWDevShmSizeInKb = "io.microsoft.lcow.shm.size-kb"
+
+	// LCOWPrivileged is used to specify that the container should be run in privileged mode.
+	LCOWPrivileged = "io.microsoft.virtualmachine.lcow.privileged"
+
+	// KubernetesContainerType is the annotation used by CRI to define the `ContainerType`.
+	KubernetesContainerType = "io.kubernetes.cri.container-type"
+
+	// KubernetesSandboxID is the annotation used by CRI to define the
+	// KubernetesContainerType == "sandbox"` ID.
+	KubernetesSandboxID = "io.kubernetes.cri.sandbox-id"
+
+	// NoSecurityHardware allows us, when it is set to true, to do testing and development without requiring SNP hardware.
+	NoSecurityHardware = "io.microsoft.virtualmachine.lcow.no_security_hardware"
+
+	// GuestStateFile specifies the path of the vmgs file to use if required. Only applies in SNP mode.
+	GuestStateFile = "io.microsoft.virtualmachine.lcow.gueststatefile"
+
+	// DmVerityRootFsVhd specifies the path of the VHD (with embedded dmverity data) file to use if required.
+	// Only applies in SNP mode.
+	DmVerityRootFsVhd = "io.microsoft.virtualmachine.lcow.dmverity-rootfs-vhd"
+
+	// DmVerityMode specifies whether the rootfs is expected to be presented as a standalone SCSI attachment,
+	// in which case the UVM boots with dm-verity.
+	DmVerityMode = "io.microsoft.virtualmachine.lcow.dmverity-mode"
+
+	// DmVerityCreateArgs specifies the `dm-mod.create` parameters to kernel and enables integrity protection of
+	// the rootfs.
+	DmVerityCreateArgs = "io.microsoft.virtualmachine.lcow.dmverity-create-args"
+
+	// UVMSecurityPolicyEnv specifies if confidential containers' related information
+	// should be written to containers' rootfs. The filenames and location are defined
+	// by securitypolicy.PolicyFilename, securitypolicy.HostAMDCertFilename and
+	// securitypolicy.ReferenceInfoFilename.
+	UVMSecurityPolicyEnv = "io.microsoft.virtualmachine.lcow.securitypolicy.env"
+
+	// UVMReferenceInfoFile specifies the filename of a signed UVM reference file to be passed to UVM.
+	UVMReferenceInfoFile = "io.microsoft.virtualmachine.lcow.uvm-reference-info-file"
+
+	// UVMReferenceInfoFile specifies the filename of a signed UVM reference file to be passed to UVM.
+	WCOWUVMReferenceInfoFile = "io.microsoft.virtualmachine.wcow.uvm-reference-info-file"
+
+	// HostAMDCertificate specifies the filename of the AMD certificates to be passed to UVM.
+	// The certificate is expected to be located in the same directory as the shim executable.
+	HostAMDCertificate = "io.microsoft.virtualmachine.lcow.amd-certificate"
+
+	// DisableLCOWTimeSyncService is used to disable the chronyd time
+	// synchronization service inside the LCOW UVM.
+	DisableLCOWTimeSyncService = "io.microsoft.virtualmachine.lcow.timesync.disable"
+
+	// NoInheritHostTimezone specifies for the hosts timezone to not be inherited by the WCOW UVM. The UVM will be set to UTC time
+	// as a default.
+	NoInheritHostTimezone = "io.microsoft.virtualmachine.wcow.timezone.noinherit"
+
+	// WCOWDisableGMSA disables providing gMSA (Group Managed Service Accounts) to
+	// a WCOW container.
+	WCOWDisableGMSA = "io.microsoft.container.wcow.gmsa.disable"
+
+	// DisableUnsafeOperations disables several unsafe operations, such as writable
+	// file share mounts, for hostile multi-tenant environments. See `AnnotationExpansions`
+	// for more information.
+	DisableUnsafeOperations = "io.microsoft.disable-unsafe-operations"
+
+	// DumpDirectoryPath provides a path to the directory in which dumps for a UVM will be collected in
+	// case the UVM crashes.
+	DumpDirectoryPath = "io.microsoft.virtualmachine.dump-directory-path"
+
+	// NumaMaximumProcessorsPerNode is the maximum number of processors per vNUMA node.
 	// This should be used for implicit vNUMA topology.
 	NumaMaximumProcessorsPerNode = "io.microsoft.virtualmachine.computetopology.processor.numa.max-processors-per-node"
 
