@@ -19,7 +19,6 @@ import (
 	"go.opencensus.io/trace"
 	"golang.org/x/sys/windows"
 
-	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/Microsoft/hcsshim/internal/oc"
 )
 
@@ -387,7 +386,7 @@ func (brdg *bridge) writeMessage(buf *bytes.Buffer, enc *json.Encoder, typ msgTy
 	defer span.End()
 	defer func() { oc.SetSpanStatus(span, err) }()
 	span.AddAttributes(
-		trace.StringAttribute("type", typ.String()),
+		trace.StringAttribute("type-n", typ.String()),
 		trace.Int64Attribute("message-id", id))
 
 	// Prepare the buffer with the message.
@@ -402,22 +401,24 @@ func (brdg *bridge) writeMessage(buf *bytes.Buffer, enc *json.Encoder, typ msgTy
 	// Update the message header with the size.
 	binary.LittleEndian.PutUint32(buf.Bytes()[hdrOffSize:], uint32(buf.Len()))
 
-	if brdg.log.Logger.GetLevel() > logrus.DebugLevel {
+	if brdg.log.Logger.GetLevel() >= logrus.DebugLevel {
 		b := buf.Bytes()[hdrSize:]
-		switch typ {
-		// container environment vars are in rpCreate for linux; rpcExecuteProcess for windows
-		case msgType(rpcCreate) | msgTypeRequest:
-			b, err = log.ScrubBridgeCreate(b)
-		case msgType(rpcExecuteProcess) | msgTypeRequest:
-			b, err = log.ScrubBridgeExecProcess(b)
-		}
-		if err != nil {
-			brdg.log.WithError(err).Warning("could not scrub bridge payload")
-		}
+		/*
+			switch typ {
+			// container environment vars are in rpCreate for linux; rpcExecuteProcess for windows
+			case msgType(rpcCreate) | msgTypeRequest:
+				b, err = log.ScrubBridgeCreate(b)
+			case msgType(rpcExecuteProcess) | msgTypeRequest:
+				b, err = log.ScrubBridgeExecProcess(b)
+			}
+			if err != nil {
+				brdg.log.WithError(err).Warning("could not scrub bridge payload")
+			}
+		*/
 		brdg.log.WithFields(logrus.Fields{
 			"payload":    string(b),
-			"type":       typ.String(),
-			"message-id": id}).Trace("bridge send")
+			"type-n":     typ.String(),
+			"message-id": id}).Debug("bridge send")
 	}
 
 	// Write the message.
