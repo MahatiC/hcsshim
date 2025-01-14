@@ -15,7 +15,7 @@ Follow the instructions below to capture the msgs and turn them into JSON
 - On elevated powershell run, `wpr.exe -start C:\ContainerPlat\ContainerPlatform.wprp`
 - On a different elevated powershell, start containerd
     - `C:\ContainerPlat\containerd.exe --config C:\ContainerPlat\containerd.toml --log-level trace`
-- On another elevated powershell, create/stop/remove pods, containers
+- On another elevated powershell, create/stop/remove pods, containers - scripts in `run-c-wcow` can be used
 - On the terminal running wpr, run these commands
     - `wpr.exe -stop captured-logs.etl`
     - `tracerpt.exe captured-logs.etl -o captured-logs.xml -of XML -lr`

@@ -1,0 +1,1 @@
+C:\ContainerPlat\crictl.exe pull mcr.microsoft.com/windows/nanoserver:1809

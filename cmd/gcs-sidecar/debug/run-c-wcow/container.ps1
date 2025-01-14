@@ -1,0 +1,1 @@
+C:\ContainerPlat\crictl.exe exec -it $env:containerID cmd.exe

@@ -1,0 +1,9 @@
+date
+.\runp.ps1
+date
+.\createc.ps1
+date
+.\startc.ps1
+date
+.\stop.ps1
+date
