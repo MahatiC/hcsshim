@@ -33,7 +33,7 @@ func MountWCOWLayers(ctx context.Context, containerID string, vm *uvm.UtilityVM,
 		if vm == nil {
 			return mountProcessIsolatedWCIFSLayers(ctx, l)
 		}
-		return mountHypervIsolatedWCIFSLayers(ctx, l, vm)
+		return mountHypervIsolatedWCIFSLayers(ctx, containerID, l, vm)
 	case *wcowForkedCIMLayers:
 		if vm == nil {
 			return mountProcessIsolatedForkedCimLayers(ctx, containerID, l)
@@ -363,7 +363,7 @@ func (lc *wcowIsolatedWCIFSLayerCloser) Release(ctx context.Context) (retErr err
 	return
 }
 
-func mountHypervIsolatedWCIFSLayers(ctx context.Context, l *wcowWCIFSLayers, vm *uvm.UtilityVM) (_ *MountedWCOWLayers, _ resources.ResourceCloser, err error) {
+func mountHypervIsolatedWCIFSLayers(ctx context.Context, containerID string, l *wcowWCIFSLayers, vm *uvm.UtilityVM) (_ *MountedWCOWLayers, _ resources.ResourceCloser, err error) {
 	log.G(ctx).WithField("os", vm.OS()).Debug("hcsshim::MountWCOWLayers V2 UVM")
 
 	// In some legacy layer use cases the scratch VHD might not be already created by the client
@@ -440,7 +440,7 @@ func mountHypervIsolatedWCIFSLayers(ctx context.Context, l *wcowWCIFSLayers, vm 
 		})
 	}
 
-	err = vm.CombineLayersWCOW(ctx, hcsLayers, ml.RootFS)
+	err = vm.CombineLayersWCOW(ctx, containerID, hcsLayers, ml.RootFS)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -4,7 +4,6 @@
 package bridge
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -274,21 +273,71 @@ func (b *Bridge) unmarshalModifySettingsAndForward(req *request) error {
 	if guestResourceType != "" {
 		switch guestResourceType {
 		case guestresource.ResourceTypeCombinedLayers:
-			settings := &guestresource.WCOWCombinedLayers{}
-			if err := json.Unmarshal(rawGuestRequest, settings); err != nil {
+			originalSettings := &guestresource.WCOWCombinedLayers{}
+			if err := json.Unmarshal(rawGuestRequest, originalSettings); err != nil {
 				log.Printf("invalid ResourceTypeCombinedLayers request %v", r)
 				return fmt.Errorf("invalid ResourceTypeCombinedLayers request %v", r)
 			}
+			log.Printf(", WCOWCombinedLayers {ContainerID: %v, ContainerRootPath: %v, Layers: %v, ScratchPath: %v} \n", originalSettings.ContainerID, originalSettings.ContainerRootPath, originalSettings.Layers, originalSettings.ScratchPath)
 
-			log.Printf(", WCOWCombinedLayers {ContainerRootPath: %v, Layers: %v, ScratchPath: %v} \n", settings.ContainerRootPath, settings.Layers, settings.ScratchPath)
-			for i, layer := range settings.Layers {
+			//// Unmarshal, remove ContainerID and marshal back the request
+
+			// Unmarshal into the structured type
+			var messageData containerModifySettings
+			if err := json.Unmarshal(req.message, &messageData); err != nil {
+				return fmt.Errorf("failed to unmarshal req.message: %v", err)
+			}
+			log.Printf("Original req.header: %x", req.header)
+			log.Printf("Original req.message: %s", string(req.message))
+
+			// Ensure Request is a map[string]interface{}
+			requestMap, ok := messageData.Request.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("failed to assert Request as map[string]interface{}")
+			}
+
+			// Navigate into "Request" -> "Settings" and modify it
+			settings, ok := requestMap["Settings"].(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("failed to locate Settings in req.message")
+			}
+
+			// Remove ContainerID
+			delete(settings, "ContainerID")
+
+			// Reconstruct the Settings field
+			modifiedSettings := map[string]interface{}{
+				"ContainerRootPath": settings["ContainerRootPath"],
+				"Layers":            settings["Layers"],
+			}
+
+			if scratchPath, exists := settings["ScratchPath"]; exists && scratchPath != nil {
+				modifiedSettings["ScratchPath"] = scratchPath
+			}
+			// Update the request with modified settings
+			requestMap["Settings"] = modifiedSettings
+			messageData.Request = requestMap // Ensure the modified request is reassigned
+			// Re-marshal back to JSON while preserving field order
+			updatedMessage, err := json.Marshal(messageData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated message: %v", err)
+			}
+
+			// Assign back to req.message
+			req.message = updatedMessage
+			size := uint32(len(updatedMessage)) + hdrSize
+			binary.LittleEndian.PutUint32(req.header[hdrOffSize:], size)
+			log.Printf("Modified req.message: %s", string(updatedMessage))
+
+			/*log.Printf(", WCOWCombinedLayers {ContainerRootPath: %v, Layers: %v, ScratchPath: %v} \n", originalSettings.ContainerRootPath, originalSettings.Layers, originalSettings.ScratchPath)
+			for i, layer := range originalSettings.Layers {
 				log.Printf("Layer %d Id: %s\n", i, layer.Id)
 				var ctx context.Context
-				err := b.PolicyEnforcer.securityPolicyEnforcer.EnforceDeviceMountPolicy(ctx, settings.ContainerRootPath, layer.Id)
+				err := b.PolicyEnforcer.securityPolicyEnforcer.EnforceDeviceMountPolicy(ctx, originalSettings.ContainerRootPath, layer.Id)
 				if err != nil {
 					log.Printf("denied by policy %v", r)
 				}
-			}
+			}*/
 
 		case guestresource.ResourceTypeNetworkNamespace:
 			settings := &hcn.HostComputeNamespace{}

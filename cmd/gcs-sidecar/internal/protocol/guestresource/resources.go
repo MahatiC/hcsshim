@@ -62,6 +62,7 @@ type LCOWCombinedLayers struct {
 }
 
 type WCOWCombinedLayers struct {
+	ContainerID       string            `json:",omitempty"`
 	ContainerRootPath string            `json:"ContainerRootPath,omitempty"`
 	Layers            []hcsschema.Layer `json:"Layers,omitempty"`
 	ScratchPath       string            `json:"ScratchPath,omitempty"`
