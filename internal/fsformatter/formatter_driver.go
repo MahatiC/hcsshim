@@ -196,6 +196,7 @@ func KmFmtCreateFormatInputBuffer(diskPath string) *KernelFormatVolumeFormatInpu
 	refsParameters.MinorVersion = uint16(14)
 
 	bufferSize := getInputBufferSize(wcharDiskPathLength)
+
 	buf := make([]byte, bufferSize)
 	inputBuffer := (*KernelFormatVolumeFormatInputBuffer)(unsafe.Pointer(&buf[0]))
 

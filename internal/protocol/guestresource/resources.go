@@ -27,6 +27,10 @@ const (
 	// ResourceTypeMappedVirtualDisk is the modify resource type for mapped
 	// virtual disks
 	ResourceTypeMappedVirtualDisk guestrequest.ResourceType = "MappedVirtualDisk"
+	// ResourceTypeMappedVirtualDiskForContainerScratch is the modify resource type
+	// specifically for refs formatting and mounting scratch vhds for c-wcow cases only.
+	ResourceTypeMappedVirtualDiskForContainerScratch guestrequest.ResourceType = "MappedVirtualDiskForContainerScratch"
+	ResourceTypeWCOWBlockCims                        guestrequest.ResourceType = "WCOWBlockCims"
 	// ResourceTypeNetwork is the modify resource type for the `NetworkAdapterV2`
 	// device.
 	ResourceTypeNetwork          guestrequest.ResourceType = "Network"
