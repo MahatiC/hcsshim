@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/Microsoft/hcsshim/internal/fsformatter"
 	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/Microsoft/hcsshim/internal/winapi"
 	"github.com/pkg/errors"
@@ -17,6 +18,12 @@ import (
 )
 
 const (
+	// This is used to construct the disk path that fsFormatter
+	// understands. `harddisk%d` here refers to the disk number
+	// associated with the corresponding lun of the attached
+	// scsi device.
+	virtualDevObjectPathFormat = "\\device\\harddisk%d\\partition0"
+
 	_CM_GETIDLIST_FILTER_BUSRELATIONS uint32 = 0x00000020
 
 	_CM_LOCATE_DEVNODE_NORMAL uint32 = 0x00000000
@@ -30,6 +37,8 @@ const (
 	_IOCTL_SCSI_GET_ADDRESS = 0x41018
 
 	_IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2d1080
+
+	_IOCTL_KERNEL_FORMAT_VOLUME_FORMAT = 0x40001000
 )
 
 var (
@@ -237,7 +246,7 @@ func getDeviceInterfaceList(ctx context.Context, controller, lun uint8) ([]strin
 func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, controller, LUN uint8) (string, uint64, error) {
 	interfacePaths, err := getDeviceInterfaceList(ctx, controller, LUN)
 	if err != nil {
-		return "", 0, nil
+		return "", 0, err
 	}
 
 	// go over each disk device interface and find out its LUN
@@ -274,4 +283,51 @@ func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, contro
 		}
 	}
 	return "", 0, fmt.Errorf("no device found with controller: %d & LUN:%d", controller, LUN)
+}
+
+// InvokeFsFormatter construct the diskPath as
+func InvokeFsFormatter(ctx context.Context, diskPath string) (string, error) {
+	// call refs formatter
+	inputBuffer, err := fsformatter.KmFmtCreateFormatInputBuffer(diskPath)
+	if err != nil {
+		return "", fmt.Errorf("error creating input buffer for fsFormatter ioctl: %v", err)
+	}
+	outputBuffer, err := fsformatter.KmFmtCreateFormatOutputBuffer(diskPath)
+	if err != nil {
+		return "", fmt.Errorf("error creating output buffer for fsFormatter ioctl: %v", err)
+	}
+
+	utf16DriverPath, err := windows.UTF16PtrFromString(fsformatter.KERNEL_FORMAT_VOLUME_WIN32_DRIVER_PATH)
+	deviceHandle, err := windows.CreateFile(utf16DriverPath,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		0,
+		nil,
+		windows.OPEN_EXISTING,
+		0,
+		0)
+	if err != nil {
+		return "", fmt.Errorf("error getting handle to fsFormatter driver: %v", err)
+	}
+	defer windows.Close(deviceHandle)
+
+	// Now invoke fsFormatter driver
+	var bytesReturned uint32
+	if err := windows.DeviceIoControl(
+		deviceHandle,
+		_IOCTL_KERNEL_FORMAT_VOLUME_FORMAT,
+		(*byte)(unsafe.Pointer(inputBuffer)),
+		inputBuffer.Size,
+		(*byte)(unsafe.Pointer(outputBuffer)),
+		outputBuffer.Size,
+		&bytesReturned,
+		nil,
+	); err != nil {
+		return "", fmt.Errorf("error returned from _IOCTL_KERNEL_FORMAT_VOLUME_FORMAT: %v", err)
+	}
+
+	// read the path returned from fsFormatter driver
+	mountedVolumePath := string(utf16.Decode(outputBuffer.VolumePathBuffer))
+	log.G(ctx).Debugf("mountedVolumePath returned %v", mountedVolumePath)
+
+	return mountedVolumePath, err
 }
