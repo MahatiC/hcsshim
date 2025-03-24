@@ -14,6 +14,15 @@ import (
 	hcsschema "github.com/Microsoft/hcsshim/internal/hcs/schema2"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
+	"github.com/Microsoft/hcsshim/internal/windevice"
+)
+
+const (
+	// This is used to construct the disk path that fsFormatter
+	// understands. `harddisk%d` here refers to the disk number
+	// associated with the corresponding lun of the attached
+	// scsi device.
+	virtualDevObjectPathFormat = "\\device\\harddisk%d\\partition0"
 )
 
 // Current intent of these handler functions is to call the security policy
@@ -337,6 +346,49 @@ func (b *Bridge) unmarshalModifySettingsAndForward(req *request) error {
 			}
 
 			log.Printf(", NetworkModifyRequest { %v} \n", settings)
+
+		case guestresource.ResourceTypeMappedVirtualDiskForContainerScratch:
+			wcowMappedVirtualDisk := &guestresource.WCOWMappedVirtualDisk{}
+			if err := json.Unmarshal(rawGuestRequest, wcowMappedVirtualDisk); err != nil {
+				log.Printf("invalid ResourceTypeMappedVirtualDisk request %v", r)
+				return fmt.Errorf("invalid ResourceTypeMappedVirtualDisk request %v", r)
+			}
+			log.Printf(", wcowMappedVirtualDisk { %v} \n", wcowMappedVirtualDisk)
+
+			// 1. First call fsFormatter to refs format the scratch disk.
+			// This will return the volume path of the mounted scratch.
+			// 2. Create symlink between the containerpath and volume path
+			// returned by fsformatter
+			// 3. TODO(kiashok) Test if we need to forward this request to the inbox GCS as all?
+			// 4. Need to enforce policy before calling into fsFormatter
+
+			// fsFormatter understands only virtualDevObjectPathFormat. Therefore fetch the
+			// disk number for the corresponding lun
+			ctx := context.Background()
+			_, diskNumber, err := windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx,
+				0, /* Only one controller allowed in wcow hyperv */
+				uint8(wcowMappedVirtualDisk.Lun))
+			if err != nil {
+				return fmt.Errorf("error getting diskNumber for LUN %d", wcowMappedVirtualDisk.Lun)
+			}
+
+			diskPath := fmt.Sprintf(virtualDevObjectPathFormat, diskNumber)
+			mountedVolumePath, err := windevice.InvokeFsFormatter(ctx, diskPath)
+			if err != nil {
+				return err
+			}
+			log.Printf("\n mountedVolumePath returned from InvokeFsFormatter: %v", mountedVolumePath)
+
+			// Just forward the req as is to the inbox gcs and let it retrive the volume
+
+			// os.Symlink(link /* pathInUVM */ , target /* mountedVolumePath returned from refs */)
+			/*
+				// create symlink with wcowMappedVirtualDisk.ContainerPath
+				err = os.Symlink(wcowMappedVirtualDisk.ContainerPath, mountedVolumePath)
+				if err != nil {
+					return fmt.Errorf("error creating symlink: %v", err)
+				}
+			*/
 
 		case guestresource.ResourceTypeMappedVirtualDisk:
 			wcowMappedVirtualDisk := &guestresource.WCOWMappedVirtualDisk{}
