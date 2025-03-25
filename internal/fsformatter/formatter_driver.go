@@ -1,6 +1,7 @@
 package fsformatter
 
 import (
+	"fmt"
 	"log"
 	"unicode/utf16"
 	"unsafe"
@@ -11,22 +12,25 @@ import (
 const (
 	KERNEL_FORMAT_VOLUME_SERVICE_PATH                       = "\\Registry\\Machine\\System\\CurrentControlSet\\Services\\KernelFSFormatter"
 	REFS_CHECKSUM_TYPE                                      = "CHECKSUM_TYPE_SHA256"
-	MAX_SIZE_OF_KERNEL_FORMAT_VOLUME_FORMAT_REFS_PARAMETERS = 512
+	MAX_SIZE_OF_KERNEL_FORMAT_VOLUME_FORMAT_REFS_PARAMETERS = 16 * 8
 	SIZE_OF_WCHAR                                           = int(unsafe.Sizeof(uint16(0)))
 	KERNEL_FORMAT_VOLUME_MAX_VOLUME_LABEL_LENGTH            = (33 * SIZE_OF_WCHAR)
 	KERNEL_FORMAT_PARTITION_SUFFIX_LENGTH                   = (15 * SIZE_OF_WCHAR)
 	KERNEL_FORMAT_VOLUME_WIN32_DRIVER_PATH                  = "\\\\?\\KernelFSFormatter"
+
+	KERNEL_FORMAT_MAX_ULONG_DECIMAL_LENGTH = uint32(10)
+	KERNEL_FORMAT_ULONG_LENGTH             = uint32(KERNEL_FORMAT_MAX_ULONG_DECIMAL_LENGTH * uint32(SIZE_OF_WCHAR))
 )
 
 // Default KERNEL_FORMAT_VOLUME_DEFAULT_LABEL is L"" , that is wchar.
 var KERNEL_FORMAT_VOLUME_DEFAULT_LABEL []uint16
 
-type KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES int
+type KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES uint32
 
 const (
-	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_INVALID = iota
-	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_REFS
-	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_MAX
+	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_INVALID = KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES(iota)
+	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_REFS    = KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES(1)
+	KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_MAX     = KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES(2)
 )
 
 func (filesystemType KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES) String() string {
@@ -43,16 +47,16 @@ func (filesystemType KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPES) String() string {
 }
 
 type KERNEL_FORMAT_VOLUME_FORMAT_REFS_PARAMETERS struct {
-	ClusterSize          uint32
+	ClusterSize          uint64
 	MetadataChecksumType uint16
 	UseDataIntegrity     bool
 	MajorVersion         uint16
 	MinorVersion         uint16
 }
 
-type KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS int
+type KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS uint32
 
-const KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAG_NONE = 0x00000000
+const KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAG_NONE = KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS(0x00000000)
 
 func (flag KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS) String() string {
 	switch flag {
@@ -81,11 +85,12 @@ type KERNEL_FORMAT_VOLUME_FORMAT_FS_PARAMETERS struct {
 	       Reserved [16]uint64
 	   };
 	*/
-	refsFormatterParams interface{}
+	refsFormatterParams interface{} //KERNEL_FORMAT_VOLUME_FORMAT_REFS_PARAMETERS
+	//Reserved            [16]uint64
 }
 
 type KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER struct {
-	Size         uint32
+	Size         uint64
 	FsParameters KERNEL_FORMAT_VOLUME_FORMAT_FS_PARAMETERS
 	Flags        KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS
 	Reserved     [4]uint32
@@ -95,9 +100,9 @@ type KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER struct {
 	DiskPathBuffer []uint16
 }
 
-type KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAGS int
+type KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAGS uint32
 
-const KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAG_NONE = 0x00000000
+const KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAG_NONE = KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAGS(0x00000000)
 
 func (flag KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER_FLAGS) String() string {
 	switch flag {
@@ -122,7 +127,10 @@ type KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER struct {
 func KmFmtCreateFormatOutputBuffer(diskPath string) (*KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER, error) {
 	utf16DiskPath := utf16.Encode([]rune(diskPath))
 	wcharDiskPathLength := uint16(len(utf16DiskPath) * SIZE_OF_WCHAR)
+	log.Printf("Output: wchar disk path length is %v", wcharDiskPathLength)
+
 	bufferSize := uint32(unsafe.Offsetof(KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER{}.VolumePathLength)) + uint32(wcharDiskPathLength) + uint32(KERNEL_FORMAT_PARTITION_SUFFIX_LENGTH)
+	log.Printf("output buffer size is %v", bufferSize)
 
 	buf := make([]uint16, bufferSize)
 	outputBuffer := (*KERNEL_FORMAT_VOLUME_FORMAT_OUTPUT_BUFFER)(unsafe.Pointer(&buf[0]))
@@ -131,27 +139,36 @@ func KmFmtCreateFormatOutputBuffer(diskPath string) (*KERNEL_FORMAT_VOLUME_FORMA
 	return outputBuffer, nil
 }
 
+/*
+KERNEL_FORMAT_VOLUME_FORMAT_FS_PARAMETERS
+
+	type KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER struct {
+	    Size         uint64
+	    FsParameters KERNEL_FORMAT_VOLUME_FORMAT_FS_PARAMETERS
+	    Flags        KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAGS
+	    Reserved     [4]uint32
+
+	    DiskPathLength uint16 // In bytes.
+	    //DiskPathBuffer string // uint16 ptr WCHAR [ANYSIZE_ARRAY]
+	    DiskPathBuffer []uint16
+	}
+*/
+func calculatDiskPathBufferSize(wcharDiskPathLength uint16) uint32 {
+	bufferSize := uint32(unsafe.Sizeof(KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER{}.Size) +
+		unsafe.Offsetof(KERNEL_FORMAT_VOLUME_FORMAT_FS_PARAMETERS{}.refsFormatterParams) +
+		/* this is for the union specifically */ MAX_SIZE_OF_KERNEL_FORMAT_VOLUME_FORMAT_REFS_PARAMETERS +
+		unsafe.Sizeof(KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER{}.Flags) +
+		unsafe.Sizeof(KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER{}.Reserved) +
+		unsafe.Sizeof(KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER{}.DiskPathLength))
+	fmt.Printf("\n calculatDiskPathBufferSize offset calculation %v \n", bufferSize)
+	fmt.Printf("\n calculatDiskPathBufferSize wcharDiskPathLength size %v \n", uint32(wcharDiskPathLength))
+	bufferSize += uint32(wcharDiskPathLength)
+
+	return bufferSize
+}
+
 func KmFmtCreateFormatInputBuffer(diskPath string) (*KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER, error) {
 	log.Printf("Constructing input buffer for fsFormatter \n")
-
-	// Construct required input buffer of format KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER
-	// volumeLabel := KERNEL_FORMAT_VOLUME_DEFAULT_LABEL // Scratch disk need not be partitioned. Therefore pass wchar empty string.
-	utf16DiskPath := utf16.Encode([]rune(diskPath))
-	wcharDiskPathLength := uint16(len(utf16DiskPath) * SIZE_OF_WCHAR)
-	bufferSize := uint32(unsafe.Offsetof(KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER{}.DiskPathBuffer) + uintptr(wcharDiskPathLength))
-	buf := make([]byte, bufferSize)
-	//utf16DiskPath = utf16.Encode([]rune(diskPath))
-	inputBuffer := (*KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER)(unsafe.Pointer(&buf[0]))
-
-	inputBuffer.Size = uint32(bufferSize)
-	inputBuffer.FsParameters.FileSystemType = KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_REFS
-	// inputBuffer.FsParameters.VolumeLabel = volumeLabel
-	// TODO: Ask Yanran if setting to 0 is ok
-	// Not setting inputBuffer.FsParameters.VolumeLabel to leave it empty
-	inputBuffer.FsParameters.VolumeLabelLength = 0 // Scratch disk need not be partitioned. Therefore pass wchar empty string.
-	inputBuffer.Flags = KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAG_NONE
-	inputBuffer.DiskPathLength = wcharDiskPathLength
-	inputBuffer.DiskPathBuffer = utf16DiskPath
 
 	// Construct refs parameters and set inputBuffer.FsParameters.refsFormatterParams
 	// TODO(kiashok): Confirm the max size with Yanran/Raj
@@ -169,7 +186,27 @@ func KmFmtCreateFormatInputBuffer(diskPath string) (*KERNEL_FORMAT_VOLUME_FORMAT
 	refsParameters.MajorVersion = 3
 	refsParameters.MinorVersion = 14
 
-	inputBuffer.FsParameters.refsFormatterParams = refsParameters
+	// Construct required input buffer of format KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER
+	// volumeLabel := KERNEL_FORMAT_VOLUME_DEFAULT_LABEL // Scratch disk need not be partitioned. Therefore pass wchar empty string.
+	utf16DiskPath := utf16.Encode([]rune(diskPath))
+	wcharDiskPathLength := uint16(len(utf16DiskPath) * SIZE_OF_WCHAR)
+	bufferSize := calculatDiskPathBufferSize(wcharDiskPathLength)
+	log.Printf("input buffer size is %v", bufferSize)
+
+	buf := make([]byte, bufferSize)
+	//utf16DiskPath = utf16.Encode([]rune(diskPath))
+	inputBuffer := (*KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER)(unsafe.Pointer(&buf[0]))
+
+	inputBuffer.Size = uint64(bufferSize)
+	inputBuffer.FsParameters.FileSystemType = KERNEL_FORMAT_VOLUME_FILESYSTEM_TYPE_REFS
+	// inputBuffer.FsParameters.VolumeLabel = volumeLabel
+	// TODO: Ask Yanran if setting to 0 is ok
+	// Not setting inputBuffer.FsParameters.VolumeLabel to leave it empty
+	inputBuffer.FsParameters.VolumeLabelLength = 0 // Scratch disk need not be partitioned. Therefore pass wchar empty string.
+	inputBuffer.Flags = KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER_FLAG_NONE
+	inputBuffer.DiskPathLength = wcharDiskPathLength
+	inputBuffer.DiskPathBuffer = utf16DiskPath
+	inputBuffer.FsParameters.refsFormatterParams = *refsParameters
 
 	return inputBuffer, nil
 }

@@ -54,9 +54,9 @@ var (
 
 // https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-storage_device_number
 type STORAGE_DEVICE_NUMBER struct {
-	DeviceType      uint64
-	DeviceNumber    uint64
-	PartitionNumber uint64
+	DeviceType      uint32
+	DeviceNumber    uint32
+	PartitionNumber uint32
 }
 
 // SCSI_ADDRESS structure used with IOCTL_SCSI_GET_ADDRESS.
@@ -263,7 +263,7 @@ func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, contro
 		}
 
 		// TODO(ambarve): is comparing controller with port number the correct way?
-		if scsiAddr.Lun == LUN && scsiAddr.PortNumber == controller {
+		if scsiAddr.Lun == LUN { //Commenting just for testing on local vm  && scsiAddr.PortNumber == controller {
 			// get the disk number
 			var bytesReturned uint32
 			var deviceNumber STORAGE_DEVICE_NUMBER
@@ -278,8 +278,8 @@ func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, contro
 			); err != nil {
 				return "", 0, err
 			}
-
-			return iPath, deviceNumber.DeviceNumber, nil
+			fmt.Printf("\n deviceNumber got: %v", deviceNumber.DeviceNumber)
+			return iPath, uint64(deviceNumber.DeviceNumber), nil
 		}
 	}
 	return "", 0, fmt.Errorf("no device found with controller: %d & LUN:%d", controller, LUN)
@@ -297,7 +297,8 @@ func InvokeFsFormatter(ctx context.Context, diskPath string) (string, error) {
 		return "", fmt.Errorf("error creating output buffer for fsFormatter ioctl: %v", err)
 	}
 
-	utf16DriverPath, err := windows.UTF16PtrFromString(fsformatter.KERNEL_FORMAT_VOLUME_WIN32_DRIVER_PATH)
+	// KERNEL_FORMAT_VOLUME_WIN32_DRIVER_PATH                  = "\\\\?\\KernelFSFormatter"
+	utf16DriverPath, _ := windows.UTF16PtrFromString(fsformatter.KERNEL_FORMAT_VOLUME_WIN32_DRIVER_PATH)
 	deviceHandle, err := windows.CreateFile(utf16DriverPath,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
 		0,
@@ -310,15 +311,19 @@ func InvokeFsFormatter(ctx context.Context, diskPath string) (string, error) {
 	}
 	defer windows.Close(deviceHandle)
 
+	//testBuf := make([]byte, 2000)
+	//utf16DiskPath = utf16.Encode([]rune(diskPath))/////
+	//testOutputBuffer := (*fsformatter.KERNEL_FORMAT_VOLUME_FORMAT_INPUT_BUFFER)(unsafe.Pointer(&testBuf[0]))
+
 	// Now invoke fsFormatter driver
 	var bytesReturned uint32
 	if err := windows.DeviceIoControl(
 		deviceHandle,
 		_IOCTL_KERNEL_FORMAT_VOLUME_FORMAT,
 		(*byte)(unsafe.Pointer(inputBuffer)),
-		inputBuffer.Size,
+		uint32(inputBuffer.Size),
 		(*byte)(unsafe.Pointer(outputBuffer)),
-		outputBuffer.Size,
+		outputBuffer.Size, // 2000
 		&bytesReturned,
 		nil,
 	); err != nil {
