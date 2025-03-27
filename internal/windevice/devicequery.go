@@ -242,7 +242,6 @@ func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, contro
 	if err != nil {
 		return "", 0, err
 	}
-
 	// go over each disk device interface and find out its LUN
 	for _, iPath := range interfacePaths {
 		handle, err := getDeviceHandleFromPath(iPath)
@@ -272,7 +271,6 @@ func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, contro
 			); err != nil {
 				return "", 0, err
 			}
-			fmt.Printf("\n deviceNumber got: %v", deviceNumber.DeviceNumber)
 			return iPath, uint64(deviceNumber.DeviceNumber), nil
 		}
 	}

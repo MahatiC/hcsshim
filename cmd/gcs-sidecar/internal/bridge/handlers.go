@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/Microsoft/hcsshim/cmd/gcs-sidecar/internal/windowssecuritypolicy"
 	"github.com/Microsoft/hcsshim/hcn"
@@ -413,30 +414,53 @@ func (b *Bridge) unmarshalModifySettingsAndForward(req *request) error {
 			// fsFormatter understands only virtualDevObjectPathFormat. Therefore fetch the
 			// disk number for the corresponding lun
 			ctx := context.Background()
-			_, diskNumber, err := windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx,
-				0, /* Only one controller allowed in wcow hyperv */
-				uint8(wcowMappedVirtualDisk.Lun))
-			if err != nil {
-				return fmt.Errorf("error getting diskNumber for LUN %d", wcowMappedVirtualDisk.Lun)
+			log.Printf("\n calling scsi ioctl to get disk path")
+			var diskNumber uint64
+			var err error
+			// It could take a few seconds for the attached scsi disk
+			// to show up inside the UVM. Therefore adding retry logic
+			// with delay here.
+			for i := 0; i < 5; i++ {
+				time.Sleep(5 * time.Second)
+				_, diskNumber, err = windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx,
+					0, /* Only one controller allowed in wcow hyperv */
+					uint8(wcowMappedVirtualDisk.Lun))
+				if err != nil {
+					if i == 5 {
+						// bail out
+						log.Printf("error getting diskNumber for LUN %d, err : %v", wcowMappedVirtualDisk.Lun, err)
+						return fmt.Errorf("error getting diskNumber for LUN %d", wcowMappedVirtualDisk.Lun)
+					}
+					continue
+				} else {
+					log.Printf("DiskNumber of lun %d is:  %d", wcowMappedVirtualDisk.Lun, diskNumber)
+				}
 			}
-
 			diskPath := fmt.Sprintf(fsformatter.VirtualDevObjectPathFormat, diskNumber)
+			log.Printf("\n diskPath: %v, diskNumber: %v ", diskPath, diskNumber)
 			mountedVolumePath, err := windevice.InvokeFsFormatter(ctx, diskPath)
 			if err != nil {
+				log.Printf("\n InvokeFsFormatter returned err: %v", err)
 				return err
 			}
 			log.Printf("\n mountedVolumePath returned from InvokeFsFormatter: %v", mountedVolumePath)
 
-			// Just forward the req as is to the inbox gcs and let it retrive the volume
+			// Just forward the req as is to the inbox gcs and let it retrive the volume.
+			// While forwarding request to inbox gcs, make sure to replace
+			// the resourceType to ResourceTypeMappedVirtualDisk that it
+			// understands
+			modifyGuestSettingsRequest.ResourceType = guestresource.ResourceTypeMappedVirtualDisk
+			r.Request = modifyGuestSettingsRequest
+			buf, err := json.Marshal(r)
+			if err != nil {
+				return fmt.Errorf("failed to marshal rpcModifySettings: %v", req)
+			}
 
-			// os.Symlink(link /* pathInUVM */ , target /* mountedVolumePath returned from refs */)
-			/*
-				// create symlink with wcowMappedVirtualDisk.ContainerPath
-				err = os.Symlink(wcowMappedVirtualDisk.ContainerPath, mountedVolumePath)
-				if err != nil {
-					return fmt.Errorf("error creating symlink: %v", err)
-				}
-			*/
+			var newRequest request
+			newRequest.header = req.header
+			setRequestSize(&newRequest, uint32(len(buf)))
+			newRequest.message = buf
+			req = &newRequest
 
 		case guestresource.ResourceTypeMappedVirtualDisk:
 			wcowMappedVirtualDisk := &guestresource.WCOWMappedVirtualDisk{}
