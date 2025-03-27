@@ -36,20 +36,26 @@ func main() {
 	fmt.Printf("Controller: %d, Lun: %d \n", controller, lun)
 
 	ctx := context.Background()
-	devPath, diskNumber, err := windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx,
+	devPath, diskNumber, err := windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(
+		ctx,
 		uint8(controller),
 		uint8(lun))
+
 	if err != nil {
-		fmt.Printf("error getting diskNumber for LUN %d", lun)
+		fmt.Printf("error getting diskNumber for LUN %d, err: %v", lun, err)
+		return
 	}
+
 	fmt.Printf("\n DevicePath: %v DiskNumber: %v \n", devPath, diskNumber)
 
 	diskPath := fmt.Sprintf(fsformatter.VirtualDevObjectPathFormat, diskNumber)
 	fmt.Printf("\n Disk path is %v", diskPath)
 
 	mountedVolumePath, err := windevice.InvokeFsFormatter(ctx, diskPath)
+
 	if err != nil {
 		fmt.Printf("error invoking formatter %v", err)
 	}
+
 	log.Printf("\n mountedVolumePath returned from InvokeFsFormatter: %v", mountedVolumePath)
 }
