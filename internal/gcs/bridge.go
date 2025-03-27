@@ -36,15 +36,24 @@ const (
 	maxMsgSize = 0x10000
 )
 
-// a single message log entry
+/*
+	Somewhat nasty logging of all the bridge messages as seen from hcsshim side.
+	Note that the hard wired file (c:\tmp\msglog.json) is created from scratch per pod
+	and then closed, as messages pass the log file is opened again and appended to such that
+	it can be manually edited to document stages of the pod/container lifecycle.
+*/
+
+// a single message log entry (don't forget to make the first character of members upper case or they will not be emitted in the JSON)
 type msgRecord struct {
-	DirectionHostToGuest bool `json:"hostToGuest"`
-	Index                int  `json:"sequence"` // which message regardless of direction.
+	DirectionHostToGuest bool   `json:"hostToGuest"`
+	Index                int    `json:"sequence"` // which message regardless of direction.
+	MsgTypeStr           string `json:"typeStr"`  // string representation of the message type to make interpretation easier
 	// type, size, id taken from the message.
-	HdrType     int64  `json:"type"`
-	HdrSize     int    `json:"size"`
-	HdrId       int64  `json:"id"`
-	Contents    string `json:"contentsB64"` // base64 contents of the payload, excluding the header
+	HdrType int64 `json:"type"`
+	HdrSize int   `json:"size"`
+	HdrId   int64 `json:"id"`
+	// ignoring base64 contents for the moment - hence contents vs Contents
+	contents    string `json:"contentsB64"` // base64 contents of the payload, excluding the header
 	ContentsLen int    `json:"contentsLen"` // strlen of the contents before B64 encoding.
 	//ForReference string `json:"forReference"` // jsonified version of the message, for reference
 }
@@ -52,35 +61,51 @@ type msgRecord struct {
 // writes all the messages sent and received, interleaved
 type msgRecorder struct {
 	whichMsg int
-	file     os.File
-	encoder  json.Encoder
+	filename string
 	mutex    sync.Mutex
 }
 
-func (mr *msgRecorder) recordMessage(directionHostToGuest bool, hdrType int64, hdrSize int, hdrId int64, contents string) {
+func (mr *msgRecorder) recordMessage(directionHostToGuest bool, msgTypeStr string, hdrType int64, hdrSize int, hdrId int64, contents string) {
 	contentsB64 := base64.StdEncoding.EncodeToString([]byte(contents))
-	msg := msgRecord{directionHostToGuest, mr.whichMsg, hdrType, hdrSize, hdrId, contentsB64, len(contents)} // , contents}
+	msg := msgRecord{directionHostToGuest, mr.whichMsg, msgTypeStr, hdrType, hdrSize, hdrId, contentsB64, len(contents)} // , contents}
 	mr.mutex.Lock()
 	defer mr.mutex.Unlock()
 	// writes the message to the file
-	mr.encoder.Encode(msg)
-	fmt.Fprintf(&mr.file, ",\n%s,\n", contents)
+
+	f, err := os.OpenFile(mr.filename, os.O_RDWR|os.O_APPEND, 0644)
+	if err == nil {
+		encoder := json.NewEncoder(f)
+		encoder.Encode(msg)
+		fmt.Fprintf(f, ",\n%s,\n\n\n", contents)
+		f.Close()
+	} else {
+		eFile, err2 := os.Create("C:\\temp\\errors.json")
+		if err2 != nil {
+			fmt.Println("Error creating file:", err)
+		} else {
+			fmt.Fprintf(eFile, "{ \"Error\" : %s },\n\n\n", err.Error())
+			eFile.Close()
+		}
+	}
 	mr.whichMsg++
 }
 
 func (mr *msgRecorder) close() {
-	mr.file.Close()
+	// mr.file.Close()
 }
 
 func newMsgRecorder() *msgRecorder {
 	// w is a file writer, writing a collection of strings
-	f, err := os.Create("C:\\temp\\msglog.json")
-	if err == nil {
-		encoder := json.NewEncoder(f)
-		return &msgRecorder{whichMsg: 0, file: *f, encoder: *encoder}
+	filename := "C:\\temp\\msglog.json"
+	f, err := os.Create(filename)
+	if err != nil {
+		fmt.Println("Error creating file:", err)
+		return nil
 	}
-	println("could not open file C:\\temp\\msglog.txt for message logging")
-	return nil
+	defer f.Close()
+	// f.WriteString("{ \"Top\" : true },\n\n\n")
+
+	return &msgRecorder{whichMsg: 0, filename: filename}
 }
 
 type requestMessage interface {
@@ -356,7 +381,7 @@ func (brdg *bridge) recvLoop() error {
 			}
 			return fmt.Errorf("bridge read failed: %w", err)
 		}
-		brdg.recorder.recordMessage(false, int64(typ), len(b), int64(id), string(b))
+		brdg.recorder.recordMessage(false, typ.String(), int64(typ), len(b), int64(id), string(b))
 		brdg.log.WithFields(logrus.Fields{
 			"payload":    string(b),
 			"type":       typ.String(),
@@ -455,7 +480,7 @@ func (brdg *bridge) writeMessage(buf *bytes.Buffer, enc *json.Encoder, typ msgTy
 	// Update the message header with the size.
 	binary.LittleEndian.PutUint32(buf.Bytes()[hdrOffSize:], uint32(buf.Len()))
 
-	brdg.recorder.recordMessage(true, int64(typ), len(buf.Bytes()), int64(id), string(buf.Bytes()[hdrSize:]))
+	brdg.recorder.recordMessage(true, typ.String(), int64(typ), len(buf.Bytes()), int64(id), string(buf.Bytes()[hdrSize:]))
 
 	if brdg.log.Logger.GetLevel() >= logrus.DebugLevel {
 		b := buf.Bytes()[hdrSize:]
