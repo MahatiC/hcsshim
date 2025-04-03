@@ -55,12 +55,6 @@ const (
 	ResourceTypeSecurityPolicy guestrequest.ResourceType = "SecurityPolicy"
 	// ResourceTypePolicyFragment is the modify resource type for injecting policy fragments.
 	ResourceTypePolicyFragment guestrequest.ResourceType = "SecurityPolicyFragment"
-	// ResourceTypeWCOWBlockCims is the modify resource type for mounting block cims for hyperv
-	// wcow containers.
-	ResourceTypeWCOWBlockCims guestrequest.ResourceType = "WCOWBlockCims"
-	// ResourceTypeMappedVirtualDiskForContainerScratch is the modify resource type
-	// specifically for refs formatting and mounting scratch vhds for c-wcow cases only.
-	ResourceTypeMappedVirtualDiskForContainerScratch guestrequest.ResourceType = "MappedVirtualDiskForContainerScratch"
 )
 
 // This class is used by a modify request to add or remove a combined layers
