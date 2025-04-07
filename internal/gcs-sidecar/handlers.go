@@ -211,7 +211,9 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			}
 		} else {
 			opts := &securitypolicy.ExecOptions{
-				Username: processParams.User,
+				User: &securitypolicy.IDName{
+					Name: processParams.User,
+				},
 			}
 			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceExecInContainerPolicyV2(
 				req.ctx,

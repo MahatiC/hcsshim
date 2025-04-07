@@ -81,6 +81,7 @@ func (h *Host) SetWCOWConfidentialUVMOptions(ctx context.Context, securityPolicy
 		DefaultCRIMounts(),
 		DefaultCRIPrivilegedMounts(),
 		maxErrorMessageLength,
+		"windows",
 	)
 	if err != nil {
 		return fmt.Errorf("error creating security policy enforcer: %v", err)
