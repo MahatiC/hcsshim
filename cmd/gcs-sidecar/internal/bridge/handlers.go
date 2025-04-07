@@ -23,6 +23,7 @@ import (
 const (
 	sandboxStateDirName = "WcSandboxState"
 	hivesDirName        = "Hives"
+	UVMContainerID      = "00000000-0000-0000-0000-000000000000"
 )
 
 // - Current intent of these handler functions is to call the security policy
@@ -126,6 +127,22 @@ func (b *Bridge) executeProcess(req *request) error {
 	}
 	log.Printf("rpcExecProcess: \n containerID: %v, schema1.ProcessParameters{ params: %v, stdioRelaySettings: %v, vsockStdioRelaySettings: %v }", containerID, processParams, stdioRelaySettings, vsockStdioRelaySettings)
 
+	if b.hostState.isSecurityPolicyEnforcerInitialized() {
+		if containerID == UVMContainerID {
+			_, _, err := b.hostState.securityPolicyEnforcer.EnforceExecExternalProcessPolicy(
+				req.ctx,
+				processParams.CommandArgs,
+				processParamEnvToOCIEnv(processParams.Environment),
+				processParams.WorkingDirectory,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "exec is denied due to policy")
+			}
+		} else {
+			//TODO: EnforceExecInContainerPolicy
+		}
+	}
+
 	b.forwardRequestToGcs(req)
 	return nil
 }
@@ -176,6 +193,12 @@ func (b *Bridge) resizeConsole(req *request) error {
 }
 
 func (b *Bridge) getProperties(req *request) error {
+	if b.hostState.isSecurityPolicyEnforcerInitialized() {
+		err := b.hostState.securityPolicyEnforcer.EnforceGetPropertiesPolicy(req.ctx)
+		if err != nil {
+			return errors.Wrapf(err, "get properties denied due to policy")
+		}
+	}
 	// TODO: This has containerGetProperties and containerGetPropertiesV2. Need to find a way to differentiate!
 	/*
 		var r containerGetProperties
