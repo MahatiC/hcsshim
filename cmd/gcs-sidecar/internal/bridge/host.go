@@ -4,6 +4,7 @@
 package bridge
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -76,14 +77,14 @@ func (h *Host) SetWCOWConfidentialUVMOptions(securityPolicyRequest *guestresourc
 	// The other point is on startup where we take a flag to set the default
 	// policy enforcer to use before a policy arrives. After that flag is set,
 	// we use the enforcer in question to set up logging as well.
-	/*var ctx context.Context
+	var ctx context.Context
 	if err = p.EnforceRuntimeLoggingPolicy(ctx); err == nil {
 		// TODO: enable OTL logging
 		//logrus.SetOutput(h.logWriter)
 	} else {
 		// TODO: disable OTL logging
 		//logrus.SetOutput(io.Discard)
-	}*/
+	}
 
 	// TODO: Use PSP driver attestation API and enable this
 	/*
@@ -102,4 +103,18 @@ func (h *Host) SetWCOWConfidentialUVMOptions(securityPolicyRequest *guestresourc
 	// s.uvmReferenceInfo = s.EncodedUVMReference
 
 	return nil
+}
+
+// processParamEnvToOCIEnv converts an Environment field from ProcessParameters
+// (a map from environment variable to value) into an array of environment
+// variable assignments (where each is in the form "<variable>=<value>") which
+// can be used by an oci.Process.
+func processParamEnvToOCIEnv(environment map[string]string) []string {
+	environmentList := make([]string, 0, len(environment))
+	for k, v := range environment {
+		// TODO: Do we need to escape things like quotation marks in
+		// environment variable values?
+		environmentList = append(environmentList, fmt.Sprintf("%s=%s", k, v))
+	}
+	return environmentList
 }
