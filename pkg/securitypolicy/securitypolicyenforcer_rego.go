@@ -805,20 +805,57 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicy(
 	capsToKeep *oci.LinuxCapabilities,
 	stdioAccessAllowed bool,
 	err error) {
-	if capabilities == nil {
+	opts := &ExecOptions{
+		User:            &user,
+		Groups:          groups,
+		Umask:           umask,
+		Capabilities:    capabilities,
+		NoNewPrivileges: &noNewPrivileges,
+	}
+	return policy.EnforceExecInContainerPolicyV2(ctx, containerID, argList, envList, workingDir, opts)
+}
+
+func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
+	ctx context.Context,
+	containerID string,
+	argList []string,
+	envList []string,
+	workingDir string,
+	opts *ExecOptions,
+) (envToKeep EnvList,
+	capsToKeep *oci.LinuxCapabilities,
+	stdioAccessAllowed bool,
+	err error) {
+
+	if (opts.OS == "" || opts.OS == "linux") && opts.Capabilities == nil {
 		return nil, nil, false, errors.New(capabilitiesNilError)
 	}
 
-	input := inputData{
-		"containerID":     containerID,
-		"argList":         argList,
-		"envList":         envList,
-		"workingDir":      workingDir,
-		"noNewPrivileges": noNewPrivileges,
-		"user":            user.toInput(),
-		"groups":          groupsToInputs(groups),
-		"umask":           umask,
-		"capabilities":    mapifyCapabilities(capabilities),
+	var input inputData
+
+	switch opts.OS {
+	case "", "linux":
+		input = inputData{
+			"containerID":     containerID,
+			"argList":         argList,
+			"envList":         envList,
+			"workingDir":      workingDir,
+			"noNewPrivileges": opts.NoNewPrivileges,
+			"user":            opts.User.toInput(),
+			"groups":          groupsToInputs(opts.Groups),
+			"umask":           opts.Umask,
+			"capabilities":    mapifyCapabilities(opts.Capabilities),
+		}
+	case "windows":
+		input = inputData{
+			"containerID": containerID,
+			"argList":     argList,
+			"envList":     envList,
+			"workingDir":  workingDir,
+			"user":        opts.Username,
+		}
+	default:
+		return nil, nil, false, errors.Errorf("unsupported OS value in options: %q", opts.OS)
 	}
 
 	results, err := policy.enforce(ctx, "exec_in_container", input)
@@ -831,11 +868,12 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicy(
 		return nil, nil, false, err
 	}
 
-	capsToKeep, err = getCapsToKeep(capabilities, results)
-	if err != nil {
-		return nil, nil, false, err
+	if opts.OS == "" || opts.OS == "linux" {
+		capsToKeep, err = getCapsToKeep(opts.Capabilities, results)
+		if err != nil {
+			return nil, nil, false, err
+		}
 	}
-
 	return envToKeep, capsToKeep, policy.stdio[containerID], nil
 }
 

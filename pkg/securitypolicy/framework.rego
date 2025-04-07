@@ -590,9 +590,22 @@ mountList_ok(mounts, allow_elevated) {
     }
 }
 
+is_linux {
+    input.OS == "linux"
+} else {
+    not input.OS  # treat empty as Linux
+}
+
+is_windows {
+    input.OS == "windows"
+}
+
+exec_in_container := exec_in_container_linux { is_linux }
+exec_in_container := exec_in_container_windows { is_windows }
+
 default exec_in_container := {"allowed": false}
 
-exec_in_container := {"metadata": [updateMatches],
+exec_in_container_linux := {"metadata": [updateMatches],
                       "env_list": env_list,
                       "caps_list": caps_list,
                       "allowed": true} {
@@ -635,6 +648,45 @@ exec_in_container := {"metadata": [updateMatches],
 
     # set final container list
     containers := possible_after_caps_containers
+
+    updateMatches := {
+        "name": "matches",
+        "action": "update",
+        "key": input.containerID,
+        "value": containers,
+    }
+}
+
+exec_in_container_windows := {"metadata": [updateMatches],
+                      "env_list": env_list,
+                      "allowed": true} {
+    container_started
+
+    # narrow our matches based upon the process requested
+    possible_after_initial_containers := [container |
+        container := data.metadata.matches[input.containerID][_]
+        # NB any change to these narrowing conditions should be reflected in
+        # the error handling, such that error messaging correctly reflects
+        # the narrowing process.
+        user_ok(container.user)
+        some process in container.exec_processes
+        command_ok(process.command)
+    ]
+
+    count(possible_after_initial_containers) > 0
+
+    # check to see if the environment variables match, dropping
+    # them if allowed (and necessary)
+    env_list := valid_envs_for_all(possible_after_initial_containers)
+    possible_after_env_containers := [container |
+        container := possible_after_initial_containers[_]
+        envList_ok(container.env_rules, env_list)
+    ]
+
+    count(possible_after_env_containers) > 0
+
+    # set final container list
+    containers := possible_after_env_containers
 
     updateMatches := {
         "name": "matches",
