@@ -15,7 +15,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-type createEnforcerFunc func(base64EncodedPolicy string, criMounts, criPrivilegedMounts []oci.Mount, maxErrorMessageLength int) (SecurityPolicyEnforcer, error)
+type createEnforcerFunc func(base64EncodedPolicy string, criMounts, criPrivilegedMounts []oci.Mount, maxErrorMessageLength int, osType string) (SecurityPolicyEnforcer, error)
 
 type EnvList []string
 
@@ -26,7 +26,6 @@ type ExecOptions struct {
 	Umask           string                 // optional: "" means unspecified
 	Capabilities    *oci.LinuxCapabilities // optional: nil means "none"
 	NoNewPrivileges *bool                  // optional: nil means "not set"
-	OS              string                 // optional: "" means unspecified
 }
 
 const (
@@ -134,7 +133,7 @@ func newSecurityPolicyFromBase64JSON(base64EncodedPolicy string) (*SecurityPolic
 
 // createAllowAllEnforcer creates and returns OpenDoorSecurityPolicyEnforcer instance.
 // Both AllowAll and Containers cannot be set at the same time.
-func createOpenDoorEnforcer(base64EncodedPolicy string, _, _ []oci.Mount, _ int) (SecurityPolicyEnforcer, error) {
+func createOpenDoorEnforcer(base64EncodedPolicy string, _, _ []oci.Mount, _ int, _ string) (SecurityPolicyEnforcer, error) {
 	// This covers the case when an "open_door" enforcer was requested, but no
 	// actual security policy was passed. This can happen e.g. when a container
 	// scratch is created for the first time.
@@ -184,6 +183,7 @@ func createStandardEnforcer(
 	criMounts,
 	criPrivilegedMounts []oci.Mount,
 	maxErrorMessageLength int,
+	osType string,
 ) (SecurityPolicyEnforcer, error) {
 	securityPolicy, err := newSecurityPolicyFromBase64JSON(base64EncodedPolicy)
 	if err != nil {
@@ -191,7 +191,7 @@ func createStandardEnforcer(
 	}
 
 	if securityPolicy.AllowAll {
-		return createOpenDoorEnforcer(base64EncodedPolicy, criMounts, criPrivilegedMounts, maxErrorMessageLength)
+		return createOpenDoorEnforcer(base64EncodedPolicy, criMounts, criPrivilegedMounts, maxErrorMessageLength, osType)
 	}
 
 	containers, err := securityPolicy.Containers.toInternal()
@@ -221,6 +221,7 @@ func CreateSecurityPolicyEnforcer(
 	criMounts,
 	criPrivilegedMounts []oci.Mount,
 	maxErrorMessageLength int,
+	osType string,
 ) (SecurityPolicyEnforcer, error) {
 	if enforcer == "" {
 		enforcer = defaultEnforcer
@@ -231,7 +232,7 @@ func CreateSecurityPolicyEnforcer(
 	if createEnforcer, ok := registeredEnforcers[enforcer]; !ok {
 		return nil, fmt.Errorf("unknown enforcer: %q", enforcer)
 	} else {
-		return createEnforcer(base64EncodedPolicy, criMounts, criPrivilegedMounts, maxErrorMessageLength)
+		return createEnforcer(base64EncodedPolicy, criMounts, criPrivilegedMounts, maxErrorMessageLength, osType)
 	}
 }
 

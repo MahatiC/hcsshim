@@ -232,12 +232,19 @@ privileged_ok(elevation_allowed) {
 }
 
 noNewPrivileges_ok(no_new_privileges) {
+    is_linux
     no_new_privileges
     input.noNewPrivileges
 }
 
 noNewPrivileges_ok(no_new_privileges) {
+    is_linux
     no_new_privileges == false
+}
+
+noNewPrivileges_ok(no_new_privileges) {
+    # no-op for windows
+    is_windows
 }
 
 idName_ok(pattern, "any", value) {
@@ -257,12 +264,18 @@ idName_ok(pattern, "re2", value) {
 }
 
 user_ok(user) {
+    is_linux
     user.umask == input.umask
     idName_ok(user.user_idname.pattern, user.user_idname.strategy, input.user)
     every group in input.groups {
         some group_idname in user.group_idnames
         idName_ok(group_idname.pattern, group_idname.strategy, group)
     }
+}
+
+user_ok(user) {
+    is_windows
+    user.user == input.user
 }
 
 seccomp_ok(seccomp_profile_sha256) {
@@ -378,6 +391,7 @@ all_caps_sets_are_equal(sets) := caps {
 }
 
 valid_caps_for_all(containers, privileged) := caps {
+    is_linux
     allow_capability_dropping
 
     # find largest matching capabilities sets aka "the most specific"
@@ -389,18 +403,30 @@ valid_caps_for_all(containers, privileged) := caps {
 }
 
 valid_caps_for_all(containers, privileged) := caps {
+    is_linux
     not allow_capability_dropping
 
     # no dropping allowed, so we just return the input
     caps := input.capabilities
 }
 
+valid_caps_for_all(containers, privileged) := caps {
+    # no-op for windows
+    is_windows
+    caps := input.capabilities
+}
+
 caps_ok(allowed_caps, requested_caps) {
+    is_linux
     capsList_ok(allowed_caps.bounding, requested_caps.bounding)
     capsList_ok(allowed_caps.effective, requested_caps.effective)
     capsList_ok(allowed_caps.inheritable, requested_caps.inheritable)
     capsList_ok(allowed_caps.permitted, requested_caps.permitted)
     capsList_ok(allowed_caps.ambient, requested_caps.ambient)
+}
+
+caps_ok(allowed_caps, requested_caps) {
+    is_windows
 }
 
 get_capabilities(container, privileged) := capabilities {
@@ -591,21 +617,16 @@ mountList_ok(mounts, allow_elevated) {
 }
 
 is_linux {
-    input.OS == "linux"
-} else {
-    not input.OS  # treat empty as Linux
+    data.metadata.operatingsystem[ostype] == "linux"
 }
 
 is_windows {
-    input.OS == "windows"
+    data.metadata.operatingsystem[ostype] == "windows"
 }
-
-exec_in_container := exec_in_container_linux { is_linux }
-exec_in_container := exec_in_container_windows { is_windows }
 
 default exec_in_container := {"allowed": false}
 
-exec_in_container_linux := {"metadata": [updateMatches],
+exec_in_container := {"metadata": [updateMatches],
                       "env_list": env_list,
                       "caps_list": caps_list,
                       "allowed": true} {
@@ -648,45 +669,6 @@ exec_in_container_linux := {"metadata": [updateMatches],
 
     # set final container list
     containers := possible_after_caps_containers
-
-    updateMatches := {
-        "name": "matches",
-        "action": "update",
-        "key": input.containerID,
-        "value": containers,
-    }
-}
-
-exec_in_container_windows := {"metadata": [updateMatches],
-                      "env_list": env_list,
-                      "allowed": true} {
-    container_started
-
-    # narrow our matches based upon the process requested
-    possible_after_initial_containers := [container |
-        container := data.metadata.matches[input.containerID][_]
-        # NB any change to these narrowing conditions should be reflected in
-        # the error handling, such that error messaging correctly reflects
-        # the narrowing process.
-        user_ok(container.user)
-        some process in container.exec_processes
-        command_ok(process.command)
-    ]
-
-    count(possible_after_initial_containers) > 0
-
-    # check to see if the environment variables match, dropping
-    # them if allowed (and necessary)
-    env_list := valid_envs_for_all(possible_after_initial_containers)
-    possible_after_env_containers := [container |
-        container := possible_after_initial_containers[_]
-        envList_ok(container.env_rules, env_list)
-    ]
-
-    count(possible_after_env_containers) > 0
-
-    # set final container list
-    containers := possible_after_env_containers
 
     updateMatches := {
         "name": "matches",
