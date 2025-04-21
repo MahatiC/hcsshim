@@ -78,6 +78,11 @@ type WCOWCombinedLayers struct {
 	ScratchPath       string            `json:"ScratchPath,omitempty"`
 }
 
+type CWCOWHostedSystem struct {
+	Spec              specs.Spec
+	CWCOWHostedSystem hcsschema.HostedSystem
+}
+
 // Defines the schema for hosted settings passed to GCS and/or OpenGCS
 
 // SCSIDevice represents a SCSI device that is attached to the system.
