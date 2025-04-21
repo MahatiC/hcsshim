@@ -41,17 +41,18 @@ func (b *Bridge) createContainer(req *request) (err error) {
 	defer span.End()
 	defer func() { oc.SetSpanStatus(span, err) }()
 
-	var r prot.ContainerCreate
+	var createContainerRequest prot.ContainerCreate
 	var containerConfig json.RawMessage
-	r.ContainerConfig.Value = &containerConfig
-	if err = commonutils.UnmarshalJSONWithHresult(req.message, &r); err != nil {
+	createContainerRequest.ContainerConfig.Value = &containerConfig
+	if err = commonutils.UnmarshalJSONWithHresult(req.message, &createContainerRequest); err != nil {
 		return errors.Wrap(err, "failed to unmarshal createContainer")
 	}
 
 	// containerConfig can be of type uvnConfig or hcsschema.HostedSystem
 	var (
-		uvmConfig          prot.UvmConfig
-		hostedSystemConfig hcsschema.HostedSystem
+		uvmConfig               prot.UvmConfig
+		hostedSystemConfig      hcsschema.HostedSystem
+		cwcowHostedSystemConfig guestresource.CWCOWHostedSystem
 	)
 	if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err == nil &&
 		uvmConfig.SystemType != "" {
@@ -63,6 +64,24 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		schemaVersion := hostedSystemConfig.SchemaVersion
 		container := hostedSystemConfig.Container
 		log.G(ctx).Tracef("rpcCreate: HostedSystemConfig: {schemaVersion: %v, container: %v}}", schemaVersion, container)
+	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err == nil {
+		cwcowHostedSystem := cwcowHostedSystemConfig.CWCOWHostedSystem
+		schemaVersion := cwcowHostedSystem.SchemaVersion
+		container := cwcowHostedSystem.Container
+		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {schemaVersion: %v, container: %v}}", schemaVersion, container)
+
+		// Strip the spec field before forwarding to gcs
+		createContainerRequest.ContainerConfig = prot.AnyInString{cwcowHostedSystem}
+		buf, err := json.Marshal(createContainerRequest)
+		if err != nil {
+			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", req)
+		}
+		var newRequest request
+		newRequest.ctx = req.ctx
+		newRequest.header = req.header
+		newRequest.header.Size = uint32(len(buf)) + prot.HdrSize
+		newRequest.message = buf
+		req = &newRequest
 	} else {
 		return fmt.Errorf("Invalid request to createContainer")
 	}
