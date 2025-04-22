@@ -20,8 +20,7 @@ type createEnforcerFunc func(base64EncodedPolicy string, criMounts, criPrivilege
 type EnvList []string
 
 type ExecOptions struct {
-	User            *IDName                // for linux, optional: nil means "not set".
-	Username        string                 // for Windows optional: "" means unspecified
+	User            *IDName                // for linux, optional: nil means "not set". for windows, only name is set
 	Groups          []IDName               // optional: empty slice or nil
 	Umask           string                 // optional: "" means unspecified
 	Capabilities    *oci.LinuxCapabilities // optional: nil means "none"

@@ -857,7 +857,7 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
 			"argList":     argList,
 			"envList":     envList,
 			"workingDir":  workingDir,
-			"user":        opts.Username,
+			"user":        opts.User.Name,
 		}
 	default:
 		return nil, nil, false, errors.Errorf("unsupported OS value in options: %q", policy.osType)
