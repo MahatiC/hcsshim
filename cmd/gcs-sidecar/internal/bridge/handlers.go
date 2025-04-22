@@ -17,6 +17,7 @@ import (
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
 	"github.com/Microsoft/hcsshim/internal/windevice"
 	"github.com/Microsoft/hcsshim/pkg/cimfs"
+	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
 	"github.com/pkg/errors"
 )
 
@@ -139,7 +140,22 @@ func (b *Bridge) executeProcess(req *request) error {
 				return errors.Wrapf(err, "exec is denied due to policy")
 			}
 		} else {
-			//TODO: EnforceExecInContainerPolicy
+			opts := &securitypolicy.ExecOptions{
+				User: &securitypolicy.IDName{
+					Name: processParams.User,
+				},
+			}
+			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceExecInContainerPolicyV2(
+				req.ctx,
+				containerID,
+				processParams.CommandArgs,
+				processParamEnvToOCIEnv(processParams.Environment),
+				processParams.WorkingDirectory,
+				opts,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "exec in container denied due to policy")
+			}
 		}
 	}
 
