@@ -48,7 +48,7 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		return errors.Wrap(err, "failed to unmarshal createContainer")
 	}
 
-	// containerConfig can be of type uvnConfig or hcsschema.HostedSystem
+	// containerConfig can be of type uvnConfig or hcsschema.HostedSystem or guestresource.CWCOWHostedSystem
 	var (
 		uvmConfig               prot.UvmConfig
 		hostedSystemConfig      hcsschema.HostedSystem
@@ -64,17 +64,40 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		schemaVersion := hostedSystemConfig.SchemaVersion
 		container := hostedSystemConfig.Container
 		log.G(ctx).Tracef("rpcCreate: HostedSystemConfig: {schemaVersion: %v, container: %v}}", schemaVersion, container)
-	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err == nil {
+	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err == nil &&
+		cwcowHostedSystemConfig.Spec.Version != "" && cwcowHostedSystemConfig.CWCOWHostedSystem.Container != nil {
 		cwcowHostedSystem := cwcowHostedSystemConfig.CWCOWHostedSystem
 		schemaVersion := cwcowHostedSystem.SchemaVersion
 		container := cwcowHostedSystem.Container
-		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {schemaVersion: %v, container: %v}}", schemaVersion, container)
+		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {spec: %v, schemaVersion: %v, container: %v}}", string(req.message), schemaVersion, container)
 
-		// Strip the spec field before forwarding to gcs
-		createContainerRequest.ContainerConfig = prot.AnyInString{cwcowHostedSystem}
-		buf, err := json.Marshal(createContainerRequest)
+		// Strip the spec field
+		hostedSystemBytes, err := json.Marshal(cwcowHostedSystem)
+
 		if err != nil {
-			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", req)
+			return fmt.Errorf("failed to marshal hostedSystem: %w", err)
+		}
+
+		// marshal it again into a JSON-escaped string which inbox GCS expects
+		hostedSystemEscapedBytes, err := json.Marshal(string(hostedSystemBytes))
+		if err != nil {
+			return fmt.Errorf("failed to marshal hostedSystem JSON: %w", err)
+		}
+
+		// Prepare a fixed struct that takes in raw message
+		type containerCreateModified struct {
+			prot.RequestBase
+			ContainerConfig json.RawMessage
+		}
+		createContainerRequestModified := containerCreateModified{
+			RequestBase:     createContainerRequest.RequestBase,
+			ContainerConfig: hostedSystemEscapedBytes,
+		}
+
+		buf, err := json.Marshal(createContainerRequestModified)
+		log.G(ctx).Tracef("marshaled request buffer: %s", string(buf))
+		if err != nil {
+			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", err)
 		}
 		var newRequest request
 		newRequest.ctx = req.ctx
