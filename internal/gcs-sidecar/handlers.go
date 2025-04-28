@@ -48,31 +48,74 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		return errors.Wrap(err, "failed to unmarshal createContainer")
 	}
 
-	// containerConfig can be of type uvnConfig or hcsschema.HostedSystem
+	// containerConfig can be of type uvnConfig or hcsschema.HostedSystem or guestresource.CWCOWHostedSystem
 	var (
 		uvmConfig               prot.UvmConfig
 		hostedSystemConfig      hcsschema.HostedSystem
 		cwcowHostedSystemConfig guestresource.CWCOWHostedSystem
 	)
-	if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err == nil {
+
+	// Unmarshal into a temp map first
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(containerConfig, &config); err != nil {
+		log.G(ctx).Tracef("createContainer: failed to unmarshal containerConfig into map: %v", err)
+		return fmt.Errorf("createContainer: invalid JSON: %w", err)
+	}
+
+	// Switch based on presence of fields
+	if _, hasSystemType := config["SystemType"]; hasSystemType {
+		// uvmConfig
+		if err := commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as uvmConfig: %w", err)
+		}
 		systemType := uvmConfig.SystemType
 		timeZoneInformation := uvmConfig.TimeZoneInformation
 		log.G(ctx).Tracef("rpcCreate: uvmConfig: {systemType: %v, timeZoneInformation: %v}}", systemType, timeZoneInformation)
-	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &hostedSystemConfig); err == nil {
+	} else if _, hasSchemaVersion := config["SchemaVersion"]; hasSchemaVersion {
+		// HostedSystem
+		if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &hostedSystemConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as hostedSystemConfig: %w", err)
+		}
 		schemaVersion := hostedSystemConfig.SchemaVersion
 		container := hostedSystemConfig.Container
 		log.G(ctx).Tracef("rpcCreate: HostedSystemConfig: {schemaVersion: %v, container: %v}}", schemaVersion, container)
-	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err == nil {
+	} else if _, hasSpec := config["Spec"]; hasSpec {
+		// CWCOWHostedSystem
+		if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as cwcowHostedSystemConfig: %w", err)
+		}
 		cwcowHostedSystem := cwcowHostedSystemConfig.CWCOWHostedSystem
 		schemaVersion := cwcowHostedSystem.SchemaVersion
 		container := cwcowHostedSystem.Container
-		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {schemaVersion: %v, container: %v}}", schemaVersion, container)
+		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {spec: %v, schemaVersion: %v, container: %v}}", string(req.message), schemaVersion, container)
 
-		// Strip the spec field before forwarding to gcs
-		createContainerRequest.ContainerConfig = prot.AnyInString{cwcowHostedSystem}
-		buf, err := json.Marshal(createContainerRequest)
+		// Strip the spec field
+		hostedSystemBytes, err := json.Marshal(cwcowHostedSystem)
+
 		if err != nil {
-			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", req)
+			return fmt.Errorf("failed to marshal hostedSystem: %w", err)
+		}
+
+		// marshal it again into a JSON-escaped string which inbox GCS expects
+		hostedSystemEscapedBytes, err := json.Marshal(string(hostedSystemBytes))
+		if err != nil {
+			return fmt.Errorf("failed to marshal hostedSystem JSON: %w", err)
+		}
+
+		// Prepare a fixed struct that takes in raw message
+		type containerCreateModified struct {
+			prot.RequestBase
+			ContainerConfig json.RawMessage
+		}
+		createContainerRequestModified := containerCreateModified{
+			RequestBase:     createContainerRequest.RequestBase,
+			ContainerConfig: hostedSystemEscapedBytes,
+		}
+
+		buf, err := json.Marshal(createContainerRequestModified)
+		log.G(ctx).Tracef("marshaled request buffer: %s", string(buf))
+		if err != nil {
+			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", err)
 		}
 		var newRequest request
 		newRequest.ctx = req.ctx
