@@ -4,13 +4,16 @@
 package bridge
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"sync"
 
 	"github.com/Microsoft/hcsshim/internal/cow"
+	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
+	"github.com/Microsoft/hcsshim/internal/pspdriver"
 	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
+	"github.com/pkg/errors"
 )
 
 type Host struct {
@@ -43,12 +46,24 @@ func (h *Host) isSecurityPolicyEnforcerInitialized() bool {
 	return h.securityPolicyEnforcer != nil
 }
 
-func (h *Host) SetWCOWConfidentialUVMOptions(securityPolicyRequest *guestresource.WCOWConfidentialOptions) error {
+func (h *Host) SetWCOWConfidentialUVMOptions(ctx context.Context, securityPolicyRequest *guestresource.WCOWConfidentialOptions) error {
 	h.policyMutex.Lock()
 	defer h.policyMutex.Unlock()
 
 	if h.securityPolicyEnforcerSet {
 		return errors.New("security policy has already been set")
+	}
+
+	log.G(ctx).Tracef("NoSecurtyHardware annotation: %v", securityPolicyRequest.NoSecurityHardware)
+	if securityPolicyRequest.NoSecurityHardware {
+		// start the psp driver
+		if err := pspdriver.StartPSPDriver(ctx); err != nil {
+			// failed to start psp driver, return prematurely
+			return errors.Wrapf(err, "failed to start PSP driver")
+		}
+	} else {
+		// TODO: Check if this is an SNP enabled VM.
+		log.G(ctx).Tracef("TODO: Check if this is an SNO enabled VM before loading the PSP driver")
 	}
 
 	// This limit ensures messages are below the character truncation limit that
