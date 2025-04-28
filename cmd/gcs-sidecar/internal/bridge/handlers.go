@@ -12,6 +12,7 @@ import (
 
 	"github.com/Microsoft/hcsshim/hcn"
 	"github.com/Microsoft/hcsshim/internal/fsformatter"
+	"github.com/Microsoft/hcsshim/internal/guest/commonutils"
 	hcsschema "github.com/Microsoft/hcsshim/internal/hcs/schema2"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
@@ -38,29 +39,92 @@ const (
 // messages are returned and responses are sent back to hcsshim from caller, ListerAndServer().
 func (b *Bridge) createContainer(req *request) error {
 	var err error = nil
-	var r containerCreate
+	var createContainerRequest containerCreate
 	var containerConfig json.RawMessage
 
-	r.ContainerConfig.Value = &containerConfig
-	if err = json.Unmarshal(req.message, &r); err != nil {
+	createContainerRequest.ContainerConfig.Value = &containerConfig
+	if err = json.Unmarshal(req.message, &createContainerRequest); err != nil {
 		log.Printf("failed to unmarshal rpcCreate: %v", req)
 		return fmt.Errorf("failed to unmarshal rpcCreate: %v", req)
 	}
+	// containerCreate.ContainerConfig can be of type uvnConfig or hcsschema.HostedSystem or guestresource.CWCOWHostedSystem
 
-	// containerCreate.ContainerConfig can be of type uvnConfig or hcsschema.HostedSystem
-	var uvmConfig uvmConfig
-	var hostedSystemConfig hcsschema.HostedSystem
-	if err = json.Unmarshal(containerConfig, &uvmConfig); err == nil {
+	// Unmarshal into a temp map first
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(containerConfig, &config); err != nil {
+		log.Printf("createContainer: failed to unmarshal containerConfig into map: %v", err)
+		return fmt.Errorf("createContainer: invalid JSON: %w", err)
+	}
+
+	// Switch based on presence of fields
+	if _, hasSystemType := config["SystemType"]; hasSystemType {
+		// uvmConfig
+		var uvmConfig uvmConfig
+		if err := commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as uvmConfig: %w", err)
+		}
 		systemType := uvmConfig.SystemType
 		timeZoneInformation := uvmConfig.TimeZoneInformation
-		log.Printf("rpcCreate: \n ContainerCreate{ requestBase: %v, uvmConfig: {systemType: %v, timeZoneInformation: %v}}", r.requestBase, systemType, timeZoneInformation)
-	} else if err = json.Unmarshal(containerConfig, &hostedSystemConfig); err == nil {
+		log.Printf("rpcCreate: \n ContainerCreate{ requestBase: %v, uvmConfig: {systemType: %v, timeZoneInformation: %v}}", createContainerRequest.requestBase, systemType, timeZoneInformation)
+
+	} else if _, hasSpec := config["Spec"]; hasSpec {
+		// CWCOWHostedSystem
+		var cwcowHostedSystemConfig guestresource.CWCOWHostedSystem
+		if err := commonutils.UnmarshalJSONWithHresult(containerConfig, &cwcowHostedSystemConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as cwcowHostedSystemConfig: %w", err)
+		}
+		spec := cwcowHostedSystemConfig.Spec
+		hostedSystem := cwcowHostedSystemConfig.CWCOWHostedSystem
+		schemaVersion := hostedSystem.SchemaVersion
+		container := hostedSystem.Container
+		log.Printf("rpcCreate: \n ContainerCreate{ requestBase: %v, ContainerConfig CWCOWHosted: {schemaVersion: %v, container: %v}}", createContainerRequest.requestBase, schemaVersion, container)
+		log.Printf("rpcCreate: \n Spec { %v}", spec)
+
+		// Strip the spec field before forwarding to gcs
+		hostedSystemBytes, err := json.Marshal(hostedSystem)
+		if err != nil {
+			return fmt.Errorf("failed to marshal hostedSystem: %w", err)
+		}
+		// Now, marshal it again into a JSON-escaped string as inbox GCS expects it
+		hostedSystemEscapedBytes, err := json.Marshal(string(hostedSystemBytes))
+		if err != nil {
+			return fmt.Errorf("failed to marshal hostedSystem JSON: %w", err)
+		}
+		// Prepare a fixed struct that takes in raw message
+		type containerCreateModified struct {
+			requestBase
+			ContainerConfig json.RawMessage
+		}
+		createContainerRequestModified := containerCreateModified{
+			requestBase:     createContainerRequest.requestBase,
+			ContainerConfig: hostedSystemEscapedBytes,
+		}
+
+		buf, err := json.Marshal(createContainerRequestModified)
+		log.Printf("marshaled request buffer: %s", string(buf))
+		if err != nil {
+			return fmt.Errorf("failed to marshal rpcCreatecontainer: %v", err)
+		}
+
+		var newRequest request
+		newRequest.header = req.header
+		newRequest.header.Size = uint32(len(buf)) + hdrSize
+		newRequest.message = buf
+		req = &newRequest
+
+	} else if _, hasSchemaVersion := config["SchemaVersion"]; hasSchemaVersion {
+		// HostedSystem (without Spec)
+		var hostedSystemConfig hcsschema.HostedSystem
+		if err := commonutils.UnmarshalJSONWithHresult(containerConfig, &hostedSystemConfig); err != nil {
+			return fmt.Errorf("createContainer: failed to unmarshal as hostedSystemConfig: %w", err)
+		}
 		schemaVersion := hostedSystemConfig.SchemaVersion
 		container := hostedSystemConfig.Container
-		log.Printf("rpcCreate: \n ContainerCreate{ requestBase: %v, ContainerConfig: {schemaVersion: %v, container: %v}}", r.requestBase, schemaVersion, container)
+		log.Printf("rpcCreate: \n ContainerCreate{ requestBase: %v, ContainerConfig Hosted: {schemaVersion: %v, container: %v}}", createContainerRequest.requestBase, schemaVersion, container)
+
 	} else {
 		log.Printf("createContainer: invalid containerConfig type. Request: %v", req)
-		return fmt.Errorf("createContainer: invalid containerConfig type. Request: %v", r)
+		return fmt.Errorf("createContainer: unknown containerConfig structure")
 	}
 
 	b.forwardRequestToGcs(req)
