@@ -1,9 +1,15 @@
+//go:build windows
+// +build windows
+
 package pspdriver
 
 import (
 	"context"
 	"fmt"
+	"syscall"
+	"unsafe"
 
+	winio "github.com/Microsoft/go-winio"
 	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows/svc"
@@ -11,7 +17,15 @@ import (
 )
 
 const (
-	serviceName = "AmdSnpPsp"
+	serviceName            = "AmdSnpPsp"
+	snpFirmwareEnvVariable = "SnpGuestReport"
+	privilegeName          = "SeSystemEnvironmentPrivilege"
+	amdSevSnpGUIDStr       = "{4c3bddb9-c2b1-4cbd-9e0c-cb45e9e0e168}"
+)
+
+var (
+	kernel32           = syscall.NewLazyDLL("kernel32.dll")
+	procGetFirmwareVar = kernel32.NewProc("GetFirmwareEnvironmentVariableW")
 )
 
 func StartPSPDriver(ctx context.Context) error {
@@ -35,9 +49,9 @@ func StartPSPDriver(ctx context.Context) error {
 		return errors.Wrapf(err, "Could not start service %q", serviceName)
 	}
 
-	log.G(ctx).Tracef("Service %q started successfully\n", serviceName)
+	log.G(ctx).Tracef("Service %q started successfully", serviceName)
 
-	// confirming the running state of the service
+	// TODO cleanup (kiashok): confirm the running state of the pspdriver
 	status, err := s.Query()
 	if err != nil {
 		return errors.Wrap(err, "could not query service status")
@@ -56,4 +70,36 @@ func StartPSPDriver(ctx context.Context) error {
 		fmt.Printf("Service state: %v\n", status.State)
 	}
 	return nil
+}
+
+// IsSNPEnabled() returns true if SNP support is available.
+func IsSNPEnabled(ctx context.Context) bool {
+	// GetFirmwareEnvironmentVariableW() requires privelege of SeSystemEnvironmentName.
+	// https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfirmwareenvironmentvariable
+	err := winio.EnableProcessPrivileges([]string{privilegeName})
+	if err != nil {
+		log.G(ctx).WithError(err).Errorf("enabling privilege failed")
+		return false
+	}
+
+	// UEFI variable name for SNP
+	firmwareEnvVar, _ := syscall.UTF16PtrFromString(snpFirmwareEnvVariable)
+	amdSnpGUID, _ := syscall.UTF16PtrFromString(amdSevSnpGUIDStr)
+	// Prepare buffer for data
+	// SNP report is max of 4KB
+	buffer := make([]byte, 4096)
+
+	r1, _, err := procGetFirmwareVar.Call(
+		uintptr(unsafe.Pointer(firmwareEnvVar)),
+		uintptr(unsafe.Pointer(amdSnpGUID)),
+		uintptr(unsafe.Pointer(&buffer[0])),
+		uintptr(len(buffer)),
+	)
+
+	if r1 == 0 {
+		log.G(ctx).WithError(err).Debugf("SNP report not available")
+		return false
+	}
+
+	return true
 }
