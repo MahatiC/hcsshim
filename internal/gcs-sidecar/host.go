@@ -55,15 +55,18 @@ func (h *Host) SetWCOWConfidentialUVMOptions(ctx context.Context, securityPolicy
 	}
 
 	log.G(ctx).Tracef("NoSecurtyHardware annotation: %v", securityPolicyRequest.NoSecurityHardware)
-	if securityPolicyRequest.NoSecurityHardware {
-		// start the psp driver
+	if securityPolicyRequest.NoSecurityHardware || pspdriver.IsSNPEnabled(ctx) {
+		// Start the psp driver
 		if err := pspdriver.StartPSPDriver(ctx); err != nil {
-			// failed to start psp driver, return prematurely
+			// Failed to start psp driver, return prematurely
 			return errors.Wrapf(err, "failed to start PSP driver")
 		}
 	} else {
-		// TODO: Check if this is an SNP enabled VM.
-		log.G(ctx).Tracef("TODO: Check if this is an SNO enabled VM before loading the PSP driver")
+		// failed to load PSP driver, error out
+		// TODO (kiashok): Following log can be cleaned up once the caller stops ignoring failure
+		// due to "rego" error.
+		log.G(ctx).Fatal("failed to load PSP driver: no hardware support or annotation specified")
+		return fmt.Errorf("failed to load PSP driver: no hardware support or annotation specified")
 	}
 
 	// This limit ensures messages are below the character truncation limit that
