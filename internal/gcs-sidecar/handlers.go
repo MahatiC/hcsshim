@@ -21,12 +21,14 @@ import (
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
 	"github.com/Microsoft/hcsshim/internal/windevice"
 	"github.com/Microsoft/hcsshim/pkg/cimfs"
+	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
 	"github.com/pkg/errors"
 )
 
 const (
 	sandboxStateDirName = "WcSandboxState"
 	hivesDirName        = "Hives"
+	UVMContainerID      = "00000000-0000-0000-0000-000000000000"
 )
 
 // - Handler functions handle the incoming message requests. It
@@ -113,6 +115,20 @@ func (b *Bridge) createContainer(req *request) (err error) {
 	return err
 }
 
+// processParamEnvToOCIEnv converts an Environment field from ProcessParameters
+// (a map from environment variable to value) into an array of environment
+// variable assignments (where each is in the form "<variable>=<value>") which
+// can be used by an oci.Process.
+func processParamEnvToOCIEnv(environment map[string]string) []string {
+	environmentList := make([]string, 0, len(environment))
+	for k, v := range environment {
+		// TODO: Do we need to escape things like quotation marks in
+		// environment variable values?
+		environmentList = append(environmentList, fmt.Sprintf("%s=%s", k, v))
+	}
+	return environmentList
+}
+
 func (b *Bridge) startContainer(req *request) (err error) {
 	_, span := oc.StartSpan(req.ctx, "sidecar::startContainer")
 	defer span.End()
@@ -176,10 +192,39 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 	if err := commonutils.UnmarshalJSONWithHresult(req.message, &r); err != nil {
 		return errors.Wrap(err, "failed to unmarshal executeProcess")
 	}
-
+	containerID := r.RequestBase.ContainerID
 	var processParams hcsschema.ProcessParameters
 	if err := commonutils.UnmarshalJSONWithHresult(processParamSettings, &processParams); err != nil {
 		return errors.Wrap(err, "executeProcess: invalid params type for request")
+	}
+
+	if b.hostState.isSecurityPolicyEnforcerInitialized() {
+		if containerID == UVMContainerID {
+			_, _, err := b.hostState.securityPolicyEnforcer.EnforceExecExternalProcessPolicy(
+				req.ctx,
+				processParams.CommandArgs,
+				processParamEnvToOCIEnv(processParams.Environment),
+				processParams.WorkingDirectory,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "exec is denied due to policy")
+			}
+		} else {
+			opts := &securitypolicy.ExecOptions{
+				Username: processParams.User,
+			}
+			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceExecInContainerPolicyV2(
+				req.ctx,
+				containerID,
+				processParams.CommandArgs,
+				processParamEnvToOCIEnv(processParams.Environment),
+				processParams.WorkingDirectory,
+				opts,
+			)
+			if err != nil {
+				return errors.Wrapf(err, "exec in container denied due to policy")
+			}
+		}
 	}
 
 	b.forwardRequestToGcs(req)
@@ -241,6 +286,13 @@ func (b *Bridge) getProperties(req *request) (err error) {
 	_, span := oc.StartSpan(req.ctx, "sidecar::getProperties")
 	defer span.End()
 	defer func() { oc.SetSpanStatus(span, err) }()
+
+	if b.hostState.isSecurityPolicyEnforcerInitialized() {
+		err := b.hostState.securityPolicyEnforcer.EnforceGetPropertiesPolicy(req.ctx)
+		if err != nil {
+			return errors.Wrapf(err, "get properties denied due to policy")
+		}
+	}
 
 	var getPropReqV2 prot.ContainerGetPropertiesV2
 	if err := commonutils.UnmarshalJSONWithHresult(req.message, &getPropReqV2); err != nil {
