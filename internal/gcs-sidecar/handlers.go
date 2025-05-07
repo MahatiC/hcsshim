@@ -53,11 +53,13 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		uvmConfig          prot.UvmConfig
 		hostedSystemConfig hcsschema.HostedSystem
 	)
-	if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err == nil {
+	if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &uvmConfig); err == nil &&
+		uvmConfig.SystemType != "" {
 		systemType := uvmConfig.SystemType
 		timeZoneInformation := uvmConfig.TimeZoneInformation
-		log.G(ctx).Tracef("rpcCreate: uvmConfig: {systemType: %v, timeZoneInformation: %v}}", systemType, timeZoneInformation)
-	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &hostedSystemConfig); err == nil {
+		log.G(ctx).Tracef("createContainer: uvmConfig: {systemType: %v, timeZoneInformation: %v}}", systemType, timeZoneInformation)
+	} else if err = commonutils.UnmarshalJSONWithHresult(containerConfig, &hostedSystemConfig); err == nil &&
+		hostedSystemConfig.SchemaVersion != nil && hostedSystemConfig.Container != nil {
 		schemaVersion := hostedSystemConfig.SchemaVersion
 		container := hostedSystemConfig.Container
 		log.G(ctx).Tracef("rpcCreate: HostedSystemConfig: {schemaVersion: %v, container: %v}}", schemaVersion, container)

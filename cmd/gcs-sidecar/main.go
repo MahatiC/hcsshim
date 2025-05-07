@@ -131,12 +131,6 @@ func main() {
 	logFile := flag.String("logfile",
 		defaultLogFile,
 		"Logging Target. Default is at C:\\gcs-sidecar-logs.log inside UVM")
-	confidentialWCOW := flag.Bool("confidential",
-		false,
-		"If true, start gcs-sidecar for confidential windows containers")
-	initialPolicyStance := flag.String("initial-policy-stance",
-		"allow",
-		"Stance: allow, deny.")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "\nUsage of %s:\n", os.Args[0])
@@ -228,23 +222,21 @@ func main() {
 	// gcs-sidecar can be used for non-confidentail hyperv wcow
 	// as well. So we do not always want to check for initialPolicyStance
 	var initialEnforcer securitypolicy.SecurityPolicyEnforcer
-	// TODO Cleanup(just for dev):
-	*confidentialWCOW = true
-	if *confidentialWCOW {
-		if *initialPolicyStance == "" {
-			*initialPolicyStance = "allow"
-		}
-		switch *initialPolicyStance {
-		case "allow":
-			initialEnforcer = &securitypolicy.OpenDoorSecurityPolicyEnforcer{}
-			logrus.Tracef("initial-policy-stance: allow")
-		case "deny":
-			initialEnforcer = &securitypolicy.ClosedDoorSecurityPolicyEnforcer{}
-			logrus.Tracef("initial-policy-stance: deny")
-		default:
-			logrus.Error("unknown initial-policy-stance")
-		}
+	// TODO (kiashok/Mahati): The initialPolicyStance is set to allow
+	// only for dev. This will eventually be set to allow/deny depending on
+	// on whether SNP is supported or not.
+	initialPolicyStance := "allow"
+	switch initialPolicyStance {
+	case "allow":
+		initialEnforcer = &securitypolicy.OpenDoorSecurityPolicyEnforcer{}
+		logrus.Tracef("initial-policy-stance: allow")
+	case "deny":
+		initialEnforcer = &securitypolicy.ClosedDoorSecurityPolicyEnforcer{}
+		logrus.Tracef("initial-policy-stance: deny")
+	default:
+		logrus.Error("unknown initial-policy-stance")
 	}
+
 	// 3. Create bridge and initializa
 	brdg := sidecar.NewBridge(shimCon, gcsCon, initialEnforcer)
 	brdg.AssignHandlers()
