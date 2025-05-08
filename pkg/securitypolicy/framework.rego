@@ -160,10 +160,16 @@ unmount_overlay := {"metadata": [removeOverlayTarget], "allowed": true} {
 }
 
 command_ok(command) {
+    is_linux
     count(input.argList) == count(command)
     every i, arg in input.argList {
         command[i] == arg
     }
+}
+
+command_ok(cmd) {
+    is_windows
+    input.cmdLine == cmd
 }
 
 env_ok(pattern, "string", value) {
@@ -250,12 +256,19 @@ workingDirectory_ok(working_dir) {
 }
 
 privileged_ok(elevation_allowed) {
+    is_linux
     not input.privileged
 }
 
 privileged_ok(elevation_allowed) {
+    is_linux
     input.privileged
     input.privileged == elevation_allowed
+}
+
+privileged_ok(no_new_privileges) {
+    # no-op for windows
+    is_windows
 }
 
 noNewPrivileges_ok(no_new_privileges) {
@@ -306,7 +319,12 @@ user_ok(user) {
 }
 
 seccomp_ok(seccomp_profile_sha256) {
+    is_linux
     input.seccompProfileSHA256 == seccomp_profile_sha256
+}
+
+seccomp_ok(seccomp_profile_sha256) {
+    is_windows
 }
 
 default container_started := false

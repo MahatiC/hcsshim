@@ -7,24 +7,60 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
-	"github.com/Microsoft/hcsshim/internal/cow"
+	"github.com/Microsoft/hcsshim/internal/bridgeutils/gcserr"
+	"github.com/Microsoft/hcsshim/internal/guest/prot"
 	"github.com/Microsoft/hcsshim/internal/log"
+	"github.com/Microsoft/hcsshim/internal/logfields"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
 	"github.com/Microsoft/hcsshim/internal/pspdriver"
 	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
+	oci "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 type Host struct {
 	containersMutex sync.Mutex
-	containers      map[string]cow.Container
+	containers      map[string]*Container
 
 	// state required for the security policy enforcement
 	policyMutex               sync.Mutex
 	securityPolicyEnforcer    securitypolicy.SecurityPolicyEnforcer
 	securityPolicyEnforcerSet bool
 	uvmReferenceInfo          string
+}
+
+type Container struct {
+	id             string
+	spec           *oci.Spec
+	processesMutex sync.Mutex
+	processes      map[uint32]*containerProcess
+
+	// current container (creation) status.
+	// Only access through [getStatus] and [setStatus].
+	//
+	// Note: its more ergonomic to store the uint32 and convert to/from [containerStatus]
+	// then use [atomic.Value] and deal with unsafe conversions to/from [any], or use [atomic.Pointer]
+	// and deal with the extra pointer dereferencing overhead.
+	status atomic.Uint32
+
+	// scratchDirPath represents the path inside the UVM where the scratch directory
+	// of this container is located. Usually, this is either `/run/gcs/c/<containerID>` or
+	// `/run/gcs/c/<UVMID>/container_<containerID>` if scratch is shared with UVM scratch.
+	scratchDirPath string
+}
+
+// Process is a struct that defines the lifetime and operations associated with
+// an oci.Process.
+type containerProcess struct {
+	// c is the owning container
+	c    *Container
+	spec prot.ProcessParameters
+	// cid is the container id that owns this process.
+	cid string
+	pid uint32
 }
 
 type SecurityPoliyEnforcer struct {
@@ -99,4 +135,57 @@ func (h *Host) SetWCOWConfidentialUVMOptions(ctx context.Context, securityPolicy
 	h.securityPolicyEnforcerSet = true
 
 	return nil
+}
+
+func (h *Host) AddContainer(id string, c *Container) error {
+	h.containersMutex.Lock()
+	defer h.containersMutex.Unlock()
+
+	if _, ok := h.containers[id]; ok {
+		return fmt.Errorf("container already exists")
+	}
+	h.containers[id] = c
+	return nil
+}
+
+func (h *Host) RemoveContainer(id string) {
+	h.containersMutex.Lock()
+	defer h.containersMutex.Unlock()
+
+	_, ok := h.containers[id]
+	if !ok {
+		return
+	}
+
+	delete(h.containers, id)
+}
+
+func (h *Host) GetCreatedContainer(id string) (*Container, error) {
+	h.containersMutex.Lock()
+	defer h.containersMutex.Unlock()
+
+	c, ok := h.containers[id]
+	if !ok {
+		return nil, gcserr.NewHresultError(gcserr.HrVmcomputeSystemNotFound)
+	}
+	return c, nil
+}
+
+// GetProcess returns the Process with the matching 'pid'. If the 'pid' does
+// not exit returns error.
+func (c *Container) GetProcess(pid uint32) (*containerProcess, error) {
+	//todo: thread a context to this function call
+	logrus.WithFields(logrus.Fields{
+		logfields.ContainerID: c.id,
+		logfields.ProcessID:   pid,
+	}).Info("opengcs::Container::GetProcess")
+
+	c.processesMutex.Lock()
+	defer c.processesMutex.Unlock()
+
+	p, ok := c.processes[pid]
+	if !ok {
+		return nil, gcserr.NewHresultError(gcserr.HrErrNotFound)
+	}
+	return p, nil
 }
