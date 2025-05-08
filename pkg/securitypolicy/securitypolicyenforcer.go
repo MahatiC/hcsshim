@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	oci "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 )
@@ -24,6 +25,26 @@ type ExecOptions struct {
 	Umask           string                 // optional: "" means unspecified
 	Capabilities    *oci.LinuxCapabilities // optional: nil means "none"
 	NoNewPrivileges *bool                  // optional: nil means "not set"
+}
+
+type CreateContainerOptions struct {
+	SandboxID            string
+	Privileged           *bool
+	NoNewPrivileges      *bool
+	Groups               []IDName
+	Umask                string
+	Capabilities         *oci.LinuxCapabilities
+	SeccompProfileSHA256 string
+}
+
+type SignalContainerOptions struct {
+	IsInitProcess bool
+	// One of these will be set depending on platform
+	LinuxSignal   syscall.Signal
+	WindowsSignal guestrequest.SignalValueWCOW
+
+	LinuxStartupArgs []string
+	WindowsCommand   string
 }
 
 const (
@@ -62,6 +83,16 @@ type SecurityPolicyEnforcer interface {
 		capabilities *oci.LinuxCapabilities,
 		seccompProfileSHA256 string,
 	) (EnvList, *oci.LinuxCapabilities, bool, error)
+	EnforceCreateContainerPolicyV2(
+		ctx context.Context,
+		containerID string,
+		argList []string,
+		envList []string,
+		workingDir string,
+		mounts []oci.Mount,
+		user IDName,
+		opts *CreateContainerOptions,
+	) (EnvList, *oci.LinuxCapabilities, bool, error)
 	ExtendDefaultMounts([]oci.Mount) error
 	EncodedSecurityPolicy() string
 	EnforceExecInContainerPolicy(
@@ -87,6 +118,7 @@ type SecurityPolicyEnforcer interface {
 	EnforceExecExternalProcessPolicy(ctx context.Context, argList []string, envList []string, workingDir string) (EnvList, bool, error)
 	EnforceShutdownContainerPolicy(ctx context.Context, containerID string) error
 	EnforceSignalContainerProcessPolicy(ctx context.Context, containerID string, signal syscall.Signal, isInitProcess bool, startupArgList []string) error
+	EnforceSignalContainerProcessPolicyV2(ctx context.Context, containerID string, opts *SignalContainerOptions) error
 	EnforcePlan9MountPolicy(ctx context.Context, target string) (err error)
 	EnforcePlan9UnmountPolicy(ctx context.Context, target string) (err error)
 	EnforceGetPropertiesPolicy(ctx context.Context) error
@@ -524,6 +556,19 @@ func (pe *StandardSecurityPolicyEnforcer) EnforceCreateContainerPolicy(
 	return envList, caps, true, nil
 }
 
+func (*StandardSecurityPolicyEnforcer) EnforceCreateContainerPolicyV2(
+	ctx context.Context,
+	containerID string,
+	argList []string,
+	envList []string,
+	workingDir string,
+	mounts []oci.Mount,
+	user IDName,
+	opts *CreateContainerOptions,
+) (EnvList, *oci.LinuxCapabilities, bool, error) {
+	return envList, opts.Capabilities, true, nil
+}
+
 // Stub. We are deprecating the standard enforcer. Newly added enforcement
 // points are simply allowed.
 func (*StandardSecurityPolicyEnforcer) EnforceExecInContainerPolicy(_ context.Context, _ string, _ []string, envList []string, _ string, _ bool, _ IDName, _ []IDName, _ string, caps *oci.LinuxCapabilities) (EnvList, *oci.LinuxCapabilities, bool, error) {
@@ -556,6 +601,10 @@ func (*StandardSecurityPolicyEnforcer) EnforceShutdownContainerPolicy(context.Co
 // Stub. We are deprecating the standard enforcer. Newly added enforcement
 // points are simply allowed.
 func (*StandardSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicy(context.Context, string, syscall.Signal, bool, []string) error {
+	return nil
+}
+
+func (*StandardSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicyV2(ctx context.Context, containerID string, opts *SignalContainerOptions) error {
 	return nil
 }
 
@@ -926,6 +975,19 @@ func (OpenDoorSecurityPolicyEnforcer) EnforceCreateContainerPolicy(_ context.Con
 	return envList, caps, true, nil
 }
 
+func (OpenDoorSecurityPolicyEnforcer) EnforceCreateContainerPolicyV2(
+	ctx context.Context,
+	containerID string,
+	argList []string,
+	envList []string,
+	workingDir string,
+	mounts []oci.Mount,
+	user IDName,
+	opts *CreateContainerOptions,
+) (EnvList, *oci.LinuxCapabilities, bool, error) {
+	return envList, opts.Capabilities, true, nil
+}
+
 func (OpenDoorSecurityPolicyEnforcer) EnforceExecInContainerPolicy(_ context.Context, _ string, _ []string, envList []string, _ string, _ bool, _ IDName, _ []IDName, _ string, caps *oci.LinuxCapabilities) (EnvList, *oci.LinuxCapabilities, bool, error) {
 	return envList, caps, true, nil
 }
@@ -950,6 +1012,10 @@ func (*OpenDoorSecurityPolicyEnforcer) EnforceShutdownContainerPolicy(context.Co
 }
 
 func (*OpenDoorSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicy(context.Context, string, syscall.Signal, bool, []string) error {
+	return nil
+}
+
+func (*OpenDoorSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicyV2(ctx context.Context, containerID string, opts *SignalContainerOptions) error {
 	return nil
 }
 
@@ -1027,6 +1093,19 @@ func (ClosedDoorSecurityPolicyEnforcer) EnforceCreateContainerPolicy(context.Con
 	return nil, nil, false, errors.New("running commands is denied by policy")
 }
 
+func (ClosedDoorSecurityPolicyEnforcer) EnforceCreateContainerPolicyV2(
+	ctx context.Context,
+	containerID string,
+	argList []string,
+	envList []string,
+	workingDir string,
+	mounts []oci.Mount,
+	user IDName,
+	opts *CreateContainerOptions,
+) (EnvList, *oci.LinuxCapabilities, bool, error) {
+	return nil, nil, false, errors.New("running commands is denied by policy")
+}
+
 func (ClosedDoorSecurityPolicyEnforcer) EnforceExecInContainerPolicy(context.Context, string, []string, []string, string, bool, IDName, []IDName, string, *oci.LinuxCapabilities) (EnvList, *oci.LinuxCapabilities, bool, error) {
 	return nil, nil, false, errors.New("starting additional processes in a container is denied by policy")
 }
@@ -1051,6 +1130,10 @@ func (*ClosedDoorSecurityPolicyEnforcer) EnforceShutdownContainerPolicy(context.
 }
 
 func (*ClosedDoorSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicy(context.Context, string, syscall.Signal, bool, []string) error {
+	return errors.New("signalling container processes is denied by policy")
+}
+
+func (*ClosedDoorSecurityPolicyEnforcer) EnforceSignalContainerProcessPolicyV2(ctx context.Context, containerID string, opts *SignalContainerOptions) error {
 	return errors.New("signalling container processes is denied by policy")
 }
 

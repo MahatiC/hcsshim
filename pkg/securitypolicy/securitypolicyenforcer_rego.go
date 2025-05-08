@@ -711,25 +711,66 @@ func (policy *regoEnforcer) EnforceCreateContainerPolicy(
 	capsToKeep *oci.LinuxCapabilities,
 	stdioAccessAllowed bool,
 	err error) {
-	if capabilities == nil {
+	opts := &CreateContainerOptions{
+		SandboxID:            sandboxID,
+		Privileged:           &privileged,
+		NoNewPrivileges:      &noNewPrivileges,
+		Groups:               groups,
+		Umask:                umask,
+		Capabilities:         capabilities,
+		SeccompProfileSHA256: seccompProfileSHA256,
+	}
+	return policy.EnforceCreateContainerPolicyV2(ctx, containerID, argList, envList, workingDir, mounts, user, opts)
+}
+
+func (policy *regoEnforcer) EnforceCreateContainerPolicyV2(
+	ctx context.Context,
+	containerID string,
+	argList []string,
+	envList []string,
+	workingDir string,
+	mounts []oci.Mount,
+	user IDName,
+	opts *CreateContainerOptions,
+) (envToKeep EnvList,
+	capsToKeep *oci.LinuxCapabilities,
+	stdioAccessAllowed bool,
+	err error) {
+
+	if policy.osType == "linux" && opts.Capabilities == nil {
 		return nil, nil, false, errors.New(capabilitiesNilError)
 	}
 
-	input := inputData{
-		"containerID":          containerID,
-		"argList":              argList,
-		"envList":              envList,
-		"workingDir":           workingDir,
-		"sandboxDir":           SandboxMountsDir(sandboxID),
-		"hugePagesDir":         HugePagesMountsDir(sandboxID),
-		"mounts":               appendMountData([]interface{}{}, mounts),
-		"privileged":           privileged,
-		"noNewPrivileges":      noNewPrivileges,
-		"user":                 user.toInput(),
-		"groups":               groupsToInputs(groups),
-		"umask":                umask,
-		"capabilities":         mapifyCapabilities(capabilities),
-		"seccompProfileSHA256": seccompProfileSHA256,
+	var input inputData
+
+	switch policy.osType {
+	case "linux":
+		input = inputData{
+			"containerID":          containerID,
+			"argList":              argList,
+			"envList":              envList,
+			"workingDir":           workingDir,
+			"sandboxDir":           SandboxMountsDir(opts.SandboxID),
+			"hugePagesDir":         HugePagesMountsDir(opts.SandboxID),
+			"mounts":               appendMountData([]interface{}{}, mounts),
+			"privileged":           opts.Privileged,
+			"noNewPrivileges":      opts.NoNewPrivileges,
+			"user":                 user.toInput(),
+			"groups":               groupsToInputs(opts.Groups),
+			"umask":                opts.Umask,
+			"capabilities":         mapifyCapabilities(opts.Capabilities),
+			"seccompProfileSHA256": opts.SeccompProfileSHA256,
+		}
+	case "windows":
+		input = inputData{
+			"containerID": containerID,
+			"argList":     argList,
+			"envList":     envList,
+			"workingDir":  workingDir,
+			"user":        user.Name,
+		}
+	default:
+		return nil, nil, false, errors.Errorf("unsupported OS value in options: %q", policy.osType)
 	}
 
 	results, err := policy.enforce(ctx, "create_container", input)
@@ -742,9 +783,11 @@ func (policy *regoEnforcer) EnforceCreateContainerPolicy(
 		return nil, nil, false, err
 	}
 
-	capsToKeep, err = getCapsToKeep(capabilities, results)
-	if err != nil {
-		return nil, nil, false, err
+	if policy.osType == "linux" {
+		capsToKeep, err = getCapsToKeep(opts.Capabilities, results)
+		if err != nil {
+			return nil, nil, false, err
+		}
 	}
 
 	stdioAccessAllowed, err = results.Bool("allow_stdio_access")
@@ -919,6 +962,32 @@ func (policy *regoEnforcer) EnforceSignalContainerProcessPolicy(ctx context.Cont
 		"signal":        signal,
 		"isInitProcess": isInitProcess,
 		"argList":       startupArgList,
+	}
+
+	_, err := policy.enforce(ctx, "signal_container_process", input)
+	return err
+}
+
+func (policy *regoEnforcer) EnforceSignalContainerProcessPolicyV2(ctx context.Context, containerID string, opts *SignalContainerOptions) error {
+	var input inputData
+
+	switch policy.osType {
+	case "linux":
+		input = inputData{
+			"containerID":   containerID,
+			"signal":        opts.LinuxSignal,
+			"isInitProcess": opts.IsInitProcess,
+			"argList":       opts.LinuxStartupArgs,
+		}
+	case "windows":
+		input = inputData{
+			"containerID":   containerID,
+			"signal":        opts.WindowsSignal,
+			"isInitProcess": opts.IsInitProcess,
+			"cmdLine":       opts.WindowsCommand,
+		}
+	default:
+		return errors.Errorf("unsupported OS value in options: %q", policy.osType)
 	}
 
 	_, err := policy.enforce(ctx, "signal_container_process", input)
