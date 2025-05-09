@@ -762,11 +762,15 @@ func (policy *regoEnforcer) EnforceCreateContainerPolicyV2(
 			"seccompProfileSHA256": opts.SeccompProfileSHA256,
 		}
 	case "windows":
+		if envList == nil {
+			envList = []string{}
+		}
 		input = inputData{
 			"containerID": containerID,
 			"argList":     argList,
 			"envList":     envList,
 			"workingDir":  workingDir,
+			"privileged":  true,
 			"user":        user.Name,
 		}
 	default:
