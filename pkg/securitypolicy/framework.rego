@@ -160,16 +160,10 @@ unmount_overlay := {"metadata": [removeOverlayTarget], "allowed": true} {
 }
 
 command_ok(command) {
-    is_linux
     count(input.argList) == count(command)
     every i, arg in input.argList {
         command[i] == arg
     }
-}
-
-command_ok(cmd) {
-    is_windows
-    input.cmdLine == cmd
 }
 
 env_ok(pattern, "string", value) {
@@ -315,7 +309,7 @@ user_ok(user) {
 
 user_ok(user) {
     is_windows
-    user.user == input.user
+    input.user == user
 }
 
 seccomp_ok(seccomp_profile_sha256) {

@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/Microsoft/hcsshim/internal/bridgeutils/gcserr"
 	"github.com/Microsoft/hcsshim/internal/guest/prot"
@@ -34,45 +33,23 @@ type Host struct {
 
 type Container struct {
 	id             string
-	spec           *oci.Spec
+	spec           oci.Spec
 	processesMutex sync.Mutex
 	processes      map[uint32]*containerProcess
-
-	// current container (creation) status.
-	// Only access through [getStatus] and [setStatus].
-	//
-	// Note: its more ergonomic to store the uint32 and convert to/from [containerStatus]
-	// then use [atomic.Value] and deal with unsafe conversions to/from [any], or use [atomic.Pointer]
-	// and deal with the extra pointer dereferencing overhead.
-	status atomic.Uint32
-
-	// scratchDirPath represents the path inside the UVM where the scratch directory
-	// of this container is located. Usually, this is either `/run/gcs/c/<containerID>` or
-	// `/run/gcs/c/<UVMID>/container_<containerID>` if scratch is shared with UVM scratch.
-	scratchDirPath string
 }
 
 // Process is a struct that defines the lifetime and operations associated with
 // an oci.Process.
 type containerProcess struct {
-	// c is the owning container
-	c    *Container
-	spec prot.ProcessParameters
+	processspec prot.ProcessParameters
 	// cid is the container id that owns this process.
 	cid string
 	pid uint32
 }
 
-type SecurityPoliyEnforcer struct {
-	// State required for the security policy enforcement
-	policyMutex               sync.Mutex
-	securityPolicyEnforcer    securitypolicy.SecurityPolicyEnforcer
-	securityPolicyEnforcerSet bool
-	uvmReferenceInfo          string
-}
-
 func NewHost(initialEnforcer securitypolicy.SecurityPolicyEnforcer) *Host {
 	return &Host{
+		containers:                make(map[string]*Container),
 		securityPolicyEnforcer:    initialEnforcer,
 		securityPolicyEnforcerSet: false,
 	}
@@ -137,13 +114,14 @@ func (h *Host) SetWCOWConfidentialUVMOptions(ctx context.Context, securityPolicy
 	return nil
 }
 
-func (h *Host) AddContainer(id string, c *Container) error {
+func (h *Host) AddContainer(ctx context.Context, id string, c *Container) error {
 	h.containersMutex.Lock()
 	defer h.containersMutex.Unlock()
 
 	if _, ok := h.containers[id]; ok {
-		return fmt.Errorf("container already exists")
+		log.G(ctx).Tracef("Container exists in the map: %v", ok)
 	}
+	log.G(ctx).Tracef("AddContainer: ID: %v", id)
 	h.containers[id] = c
 	return nil
 }
