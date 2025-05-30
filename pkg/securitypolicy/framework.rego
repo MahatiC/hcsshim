@@ -1207,6 +1207,7 @@ command_matches {
 }
 
 errors["invalid command"] {
+    is_linux
     input.rule in ["create_container", "exec_in_container", "exec_external"]
     not command_matches
 }
@@ -1620,6 +1621,7 @@ user_matches {
 }
 
 errors["invalid user"] {
+    is_linux
     input.rule in ["create_container", "exec_in_container"]
     not user_matches
 }

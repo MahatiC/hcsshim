@@ -285,11 +285,14 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 		return errors.Wrap(err, "executeProcess: invalid params type for request")
 	}
 
+	commandLine := []string{processParams.CommandLine}
+
 	if b.hostState.isSecurityPolicyEnforcerInitialized() {
 		if containerID == UVMContainerID {
+			log.G(req.ctx).Tracef("Enforcing policy on external exec process")
 			_, _, err := b.hostState.securityPolicyEnforcer.EnforceExecExternalProcessPolicy(
 				req.ctx,
-				processParams.CommandArgs,
+				commandLine,
 				processParamEnvToOCIEnv(processParams.Environment),
 				processParams.WorkingDirectory,
 			)
@@ -302,14 +305,16 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 					Name: processParams.User,
 				},
 			}
-			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceExecInContainerPolicyV2(
-				req.ctx,
-				containerID,
-				processParams.CommandArgs,
-				processParamEnvToOCIEnv(processParams.Environment),
-				processParams.WorkingDirectory,
-				opts,
-			)
+			log.G(req.ctx).Tracef("Enforcing policy on exec in container")
+			_, _, _, err := b.hostState.securityPolicyEnforcer.
+				EnforceExecInContainerPolicyV2(
+					req.ctx,
+					containerID,
+					commandLine,
+					processParamEnvToOCIEnv(processParams.Environment),
+					processParams.WorkingDirectory,
+					opts,
+				)
 			if err != nil {
 				return errors.Wrapf(err, "exec in container denied due to policy")
 			}
