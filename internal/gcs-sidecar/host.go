@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/Microsoft/hcsshim/internal/bridgeutils/gcserr"
-	"github.com/Microsoft/hcsshim/internal/guest/prot"
+	hcsschema "github.com/Microsoft/hcsshim/internal/hcs/schema2"
 	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/Microsoft/hcsshim/internal/logfields"
 	"github.com/Microsoft/hcsshim/internal/protocol/guestresource"
@@ -41,7 +41,7 @@ type Container struct {
 // Process is a struct that defines the lifetime and operations associated with
 // an oci.Process.
 type containerProcess struct {
-	processspec prot.ProcessParameters
+	processspec hcsschema.ProcessParameters
 	// cid is the container id that owns this process.
 	cid string
 	pid uint32
@@ -138,7 +138,7 @@ func (h *Host) RemoveContainer(id string) {
 	delete(h.containers, id)
 }
 
-func (h *Host) GetCreatedContainer(id string) (*Container, error) {
+func (h *Host) GetCreatedContainer(ctx context.Context, id string) (*Container, error) {
 	h.containersMutex.Lock()
 	defer h.containersMutex.Unlock()
 

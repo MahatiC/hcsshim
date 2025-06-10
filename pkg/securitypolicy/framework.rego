@@ -720,11 +720,10 @@ exec_in_container := {"metadata": [updateMatches],
 
     # check to see if the capabilities variables match, dropping
     # them if allowed (and necessary)
-    caps_list := valid_caps_for_all(possible_after_env_containers, container_privileged)
-    possible_after_caps_containers := [container |
-        container := possible_after_env_containers[_]
-        caps_ok(get_capabilities(container, container_privileged), caps_list)
-    ]
+    caps_result := possible_container_after_caps(possible_after_env_containers, container_privileged)
+
+    possible_after_caps_containers := caps_result.containers
+    caps_list := caps_result.caps_list
 
     count(possible_after_caps_containers) > 0
 
@@ -1207,7 +1206,6 @@ command_matches {
 }
 
 errors["invalid command"] {
-    is_linux
     input.rule in ["create_container", "exec_in_container", "exec_external"]
     not command_matches
 }

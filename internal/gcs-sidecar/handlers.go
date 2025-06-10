@@ -82,7 +82,7 @@ func (b *Bridge) createContainer(req *request) (err error) {
 				spec:      spec,
 				processes: make(map[uint32]*containerProcess),
 			}
-
+			log.G(ctx).Tracef("Adding ContainerID: %v", containerID)
 			if err := b.hostState.AddContainer(req.ctx, containerID, c); err != nil {
 				log.G(ctx).Tracef("Container exists in the map!")
 			}
@@ -299,6 +299,7 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			if err != nil {
 				return errors.Wrapf(err, "exec is denied due to policy")
 			}
+			b.forwardRequestToGcs(req)
 		} else {
 			opts := &securitypolicy.ExecOptions{
 				User: &securitypolicy.IDName{
@@ -318,10 +319,54 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			if err != nil {
 				return errors.Wrapf(err, "exec in container denied due to policy")
 			}
-		}
-	}
+			headerID := req.header.ID
 
-	b.forwardRequestToGcs(req)
+			// Initiate process ID
+			b.pendingMu.Lock()
+			b.pending[headerID] = nil // nil means not yet received
+			b.pendingMu.Unlock()
+
+			defer func() {
+				b.pendingMu.Lock()
+				delete(b.pending, headerID)
+				b.pendingMu.Unlock()
+			}()
+
+			// Forward the request to gcs
+			b.forwardRequestToGcs(req)
+
+			// Fetch the process ID from response
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				log.G(req.ctx).Tracef("waiting for exec resp")
+				b.pendingMu.Lock()
+				resp := b.pending[headerID]
+				b.pendingMu.Unlock()
+
+				if resp != nil {
+					log.G(req.ctx).Tracef("Got response: %+v", resp)
+					c, err := b.hostState.GetCreatedContainer(req.ctx, containerID)
+					if err != nil {
+						log.G(req.ctx).Tracef("Container not found during exec: %v", containerID)
+						return errors.Wrapf(err, "containerID doesn't exist")
+					}
+					c.processesMutex.Lock()
+					defer c.processesMutex.Unlock()
+					c.processes[resp.ProcessID] = &containerProcess{
+						processspec: processParams,
+						cid:         c.id,
+						pid:         resp.ProcessID,
+					}
+					return nil
+				}
+				time.Sleep(10 * time.Millisecond) // backoff
+			}
+
+			return errors.Wrap(err, "timedout waiting for exec response")
+		}
+	} else {
+		b.forwardRequestToGcs(req)
+	}
 	return nil
 }
 
@@ -355,8 +400,34 @@ func (b *Bridge) signalProcess(req *request) (err error) {
 		if err := commonutils.UnmarshalJSONWithHresult(rawOpts, &wcowOptions); err != nil {
 			return errors.Wrap(err, "signalProcess: invalid Options type for request")
 		}
-	}
 
+		if b.hostState.isSecurityPolicyEnforcerInitialized() {
+
+			log.G(req.ctx).Tracef("RawOpts are not nil")
+			containerID := r.RequestBase.ContainerID
+			c, err := b.hostState.GetCreatedContainer(req.ctx, containerID)
+			if err != nil {
+				return err
+			}
+
+			p, err := c.GetProcess(r.ProcessID)
+			if err != nil {
+				log.G(req.ctx).Tracef("Process not found %v", r.ProcessID)
+				return err
+			}
+			cmdLine := p.processspec.CommandLine
+			opts := &securitypolicy.SignalContainerOptions{
+				IsInitProcess:  false,
+				WindowsSignal:  wcowOptions.Signal,
+				WindowsCommand: cmdLine,
+			}
+			err = b.hostState.securityPolicyEnforcer.EnforceSignalContainerProcessPolicyV2(req.ctx, containerID, opts)
+			if err != nil {
+				return err
+			}
+		}
+
+	}
 	b.forwardRequestToGcs(req)
 	return nil
 }
@@ -434,6 +505,15 @@ func (b *Bridge) deleteContainerState(req *request) (err error) {
 	if err := commonutils.UnmarshalJSONWithHresult(req.message, &r); err != nil {
 		return errors.Wrap(err, "failed to unmarshal deleteContainerState")
 	}
+
+	//TODO: Remove container state locally before passing it to inbox-gcs
+	/*
+		c, err := b.hostState.GetCreatedContainer(request.ContainerID)
+		if err != nil {
+			return nil, err
+		}
+		// remove container state regardless of delete's success
+		defer b.hostState.RemoveContainer(request.ContainerID)*/
 
 	b.forwardRequestToGcs(req)
 	return nil
@@ -520,12 +600,6 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 			if err != nil {
 				return errors.Wrap(err, "error creating enforcer")
 			}
-			/*
-				// ignore the returned err temporarily as it fails with "unknown policy rego" error
-					; err != nil {
-						return err
-					}
-			*/
 			// Send response back to shim
 			resp := &prot.ResponseBase{
 				Result:     0, // 0 means success
