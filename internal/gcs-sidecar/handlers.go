@@ -402,7 +402,6 @@ func (b *Bridge) signalProcess(req *request) (err error) {
 		}
 
 		if b.hostState.isSecurityPolicyEnforcerInitialized() {
-
 			log.G(req.ctx).Tracef("RawOpts are not nil")
 			containerID := r.RequestBase.ContainerID
 			c, err := b.hostState.GetCreatedContainer(req.ctx, containerID)
@@ -610,7 +609,12 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 				return errors.Wrap(err, "error sending response to hcsshim")
 			}
 			return nil
-
+		case guestresource.ResourceTypePolicyFragment:
+			r, ok := modifyGuestSettingsRequest.Settings.(*guestresource.LCOWSecurityPolicyFragment)
+			if !ok {
+				return errors.New("the request settings are not of type LCOWSecurityPolicyFragment")
+			}
+			return b.hostState.InjectFragment(ctx, r)
 		case guestresource.ResourceTypeWCOWBlockCims:
 			// This is request to mount the merged cim at given volumeGUID
 			wcowBlockCimMounts := modifyGuestSettingsRequest.Settings.(*guestresource.WCOWBlockCIMMounts)
