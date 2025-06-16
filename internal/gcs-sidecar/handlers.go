@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Microsoft/hcsshim/hcn"
@@ -25,6 +26,7 @@ import (
 	"github.com/Microsoft/hcsshim/pkg/cimfs"
 	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -77,6 +79,15 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		containerID := createContainerRequest.ContainerID
 		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {spec: %v, schemaVersion: %v, container: %v}}", string(req.message), schemaVersion, container)
 		if b.hostState.isSecurityPolicyEnforcerInitialized() {
+			user := securitypolicy.IDName{
+				Name: spec.Process.User.Username,
+			}
+			log.G(ctx).Tracef("user test: %v", user)
+			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceCreateContainerPolicyV2(req.ctx, containerID, spec.Process.Args, spec.Process.Env, spec.Process.Cwd, spec.Mounts, user, nil)
+
+			if err != nil {
+				return fmt.Errorf("CreateContainer operation is denied by policy: %v", err)
+			}
 			c := &Container{
 				id:        containerID,
 				spec:      spec,
@@ -91,16 +102,6 @@ func (b *Bridge) createContainer(req *request) (err error) {
 					b.hostState.RemoveContainer(containerID)
 				}
 			}(err)
-
-			user := securitypolicy.IDName{
-				Name: spec.Process.User.Username,
-			}
-			log.G(ctx).Tracef("user test: %v", user)
-			_, _, _, err := b.hostState.securityPolicyEnforcer.EnforceCreateContainerPolicyV2(req.ctx, containerID, spec.Process.Args, spec.Process.Env, spec.Process.Cwd, spec.Mounts, user, nil)
-
-			if err != nil {
-				return fmt.Errorf("CreateContainer operation is denied by policy: %v", err)
-			}
 			// Write security policy, signed UVM reference and host AMD certificate to
 			// container's rootfs, so that application and sidecar containers can have
 			// access to it. The security policy is required by containers which need to
@@ -268,6 +269,15 @@ func (b *Bridge) shutdownForced(req *request) (err error) {
 	return nil
 }
 
+// escapeArgs makes a Windows-style escaped command line from a set of arguments.
+func escapeArgs(args []string) string {
+	escapedArgs := make([]string, len(args))
+	for i, a := range args {
+		escapedArgs[i] = windows.EscapeArg(a)
+	}
+	return strings.Join(escapedArgs, " ")
+}
+
 func (b *Bridge) executeProcess(req *request) (err error) {
 	_, span := oc.StartSpan(req.ctx, "sidecar::executeProcess")
 	defer span.End()
@@ -301,27 +311,39 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			}
 			b.forwardRequestToGcs(req)
 		} else {
-			opts := &securitypolicy.ExecOptions{
-				User: &securitypolicy.IDName{
-					Name: processParams.User,
-				},
-			}
-			log.G(req.ctx).Tracef("Enforcing policy on exec in container")
-			_, _, _, err := b.hostState.securityPolicyEnforcer.
-				EnforceExecInContainerPolicyV2(
-					req.ctx,
-					containerID,
-					commandLine,
-					processParamEnvToOCIEnv(processParams.Environment),
-					processParams.WorkingDirectory,
-					opts,
-				)
+			// fetch the container command line
+			c, err := b.hostState.GetCreatedContainer(req.ctx, containerID)
 			if err != nil {
-				return errors.Wrapf(err, "exec in container denied due to policy")
+				log.G(req.ctx).Tracef("Container not found during exec: %v", containerID)
+				return errors.Wrapf(err, "containerID doesn't exist")
+			}
+
+			// if this is an exec of Container command line, then it's already enforced
+			// during container creation, hence skip it here
+			containerCommandLine := escapeArgs(c.spec.Process.Args)
+			if processParams.CommandLine != containerCommandLine {
+				opts := &securitypolicy.ExecOptions{
+					User: &securitypolicy.IDName{
+						Name: processParams.User,
+					},
+				}
+				log.G(req.ctx).Tracef("Enforcing policy on exec in container")
+				_, _, _, err = b.hostState.securityPolicyEnforcer.
+					EnforceExecInContainerPolicyV2(
+						req.ctx,
+						containerID,
+						commandLine,
+						processParamEnvToOCIEnv(processParams.Environment),
+						processParams.WorkingDirectory,
+						opts,
+					)
+				if err != nil {
+					return errors.Wrapf(err, "exec in container denied due to policy")
+				}
 			}
 			headerID := req.header.ID
 
-			// Initiate process ID
+			// initiate process ID
 			b.pendingMu.Lock()
 			b.pending[headerID] = nil // nil means not yet received
 			b.pendingMu.Unlock()
@@ -332,10 +354,10 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 				b.pendingMu.Unlock()
 			}()
 
-			// Forward the request to gcs
+			// forward the request to gcs
 			b.forwardRequestToGcs(req)
 
-			// Fetch the process ID from response
+			// fetch the process ID from response
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
 				log.G(req.ctx).Tracef("waiting for exec resp")
@@ -343,13 +365,10 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 				resp := b.pending[headerID]
 				b.pendingMu.Unlock()
 
+				// capture the Process details, so that we can later enforce
+				// on the allowed signals on the Process
 				if resp != nil {
 					log.G(req.ctx).Tracef("Got response: %+v", resp)
-					c, err := b.hostState.GetCreatedContainer(req.ctx, containerID)
-					if err != nil {
-						log.G(req.ctx).Tracef("Container not found during exec: %v", containerID)
-						return errors.Wrapf(err, "containerID doesn't exist")
-					}
 					c.processesMutex.Lock()
 					defer c.processesMutex.Unlock()
 					c.processes[resp.ProcessID] = &containerProcess{
