@@ -32,6 +32,7 @@ import (
 const (
 	sandboxStateDirName = "WcSandboxState"
 	hivesDirName        = "Hives"
+	devPathFormat       = "\\\\.\\PHYSICALDRIVE%d"
 	UVMContainerID      = "00000000-0000-0000-0000-000000000000"
 )
 
@@ -47,10 +48,10 @@ func (b *Bridge) createContainer(req *request) (err error) {
 	defer span.End()
 	defer func() { oc.SetSpanStatus(span, err) }()
 
-	var createContainerRequest prot.ContainerCreate
+	var r prot.ContainerCreate
 	var containerConfig json.RawMessage
-	createContainerRequest.ContainerConfig.Value = &containerConfig
-	if err = commonutils.UnmarshalJSONWithHresult(req.message, &createContainerRequest); err != nil {
+	r.ContainerConfig.Value = &containerConfig
+	if err = commonutils.UnmarshalJSONWithHresult(req.message, &r); err != nil {
 		return errors.Wrap(err, "failed to unmarshal createContainer")
 	}
 
@@ -76,7 +77,7 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		schemaVersion := cwcowHostedSystem.SchemaVersion
 		container := cwcowHostedSystem.Container
 		spec := cwcowHostedSystemConfig.Spec
-		containerID := createContainerRequest.ContainerID
+		containerID := r.ContainerID
 		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {spec: %v, schemaVersion: %v, container: %v}}", string(req.message), schemaVersion, container)
 		if b.hostState.isSecurityPolicyEnforcerInitialized() {
 			user := securitypolicy.IDName{
@@ -166,7 +167,7 @@ func (b *Bridge) createContainer(req *request) (err error) {
 			ContainerConfig json.RawMessage
 		}
 		createContainerRequestModified := containerCreateModified{
-			RequestBase:     createContainerRequest.RequestBase,
+			RequestBase:     r.RequestBase,
 			ContainerConfig: hostedSystemEscapedBytes,
 		}
 
@@ -182,7 +183,7 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		newRequest.message = buf
 		req = &newRequest
 	} else {
-		return fmt.Errorf("Invalid request to createContainer")
+		return fmt.Errorf("invalid request to createContainer")
 	}
 
 	b.forwardRequestToGcs(req)
@@ -570,7 +571,7 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 	modifyGuestSettingsRequest := modifyRequest.Request.(*guestrequest.ModificationRequest)
 	guestResourceType := modifyGuestSettingsRequest.ResourceType
 	guestRequestType := modifyGuestSettingsRequest.RequestType
-	log.G(ctx).Tracef("rpcModifySettings: resourceType: %v, requestType: %v", guestResourceType, guestRequestType)
+	log.G(ctx).Tracef("modifySettings: resourceType: %v, requestType: %v", guestResourceType, guestRequestType)
 
 	if guestRequestType == "" {
 		guestRequestType = guestrequest.RequestTypeAdd
@@ -623,7 +624,7 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 				Result:     0, // 0 means success
 				ActivityID: req.activityID,
 			}
-			err = b.sendResponseToShim(req.ctx, prot.RpcModifySettings, req.header.ID, resp)
+			err = b.sendResponseToShim(req.ctx, prot.RPCModifySettings, req.header.ID, resp)
 			if err != nil {
 				return errors.Wrap(err, "error sending response to hcsshim")
 			}
@@ -641,29 +642,27 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 			log.G(ctx).Tracef("WCOWBlockCIMMounts { %v}", wcowBlockCimMounts)
 
 			// The block device takes some time to show up. Wait for a few seconds.
-			time.Sleep(6 * time.Second)
+			time.Sleep(2 * time.Second)
 
 			var layerCIMs []*cimfs.BlockCIM
 			layerHashes := make([]string, len(wcowBlockCimMounts.BlockCIMs))
 			ctx := req.ctx
 			for i, blockCimDevice := range wcowBlockCimMounts.BlockCIMs {
 				// Get the scsi device path for the blockCim lun
-				/*scsiDevPath*/
-				_, diskNumber, err := windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(
+				devNumber, err := windevice.GetDeviceNumberFromControllerLUN(
 					ctx,
 					0, /* controller is always 0 for wcow */
 					uint8(blockCimDevice.Lun))
 				if err != nil {
 					return errors.Wrap(err, "err getting scsiDevPath")
 				}
-				physicalDevPath := fmt.Sprintf("\\\\.\\PHYSICALDRIVE%d", diskNumber)
 				layerCim := cimfs.BlockCIM{
 					Type:      cimfs.BlockCIMTypeDevice,
-					BlockPath: physicalDevPath,
+					BlockPath: fmt.Sprintf(devPathFormat, devNumber),
 					CimName:   blockCimDevice.CimName,
 				}
 				layerCIMs = append(layerCIMs, &layerCim)
-				log.G(ctx).Debugf("block CIM layer digest %s, path: %s\n", blockCimDevice.Digest, physicalDevPath)
+				log.G(ctx).Debugf("block CIM layer digest %s\n", blockCimDevice.Digest)
 				layerHashes[i] = blockCimDevice.Digest
 			}
 
@@ -682,7 +681,7 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 				// Get the topmost merge CIM and invoke the MountMergedBlockCIMs
 				_, err := cimfs.MountMergedBlockCIMs(layerCIMs[0], layerCIMs[1:], wcowBlockCimMounts.MountFlags, wcowBlockCimMounts.VolumeGuid)
 				if err != nil {
-					return errors.Wrap(err, "error mounting multilayer merged block cims")
+					return errors.Wrap(err, "error mounting multilayer block cims")
 				}
 			} else {
 				_, err := cimfs.Mount(filepath.Join(layerCIMs[0].BlockPath, layerCIMs[0].CimName), wcowBlockCimMounts.VolumeGuid, wcowBlockCimMounts.MountFlags)
@@ -696,7 +695,7 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 				Result:     0, // 0 means success
 				ActivityID: req.activityID,
 			}
-			err = b.sendResponseToShim(req.ctx, prot.RpcModifySettings, req.header.ID, resp)
+			err = b.sendResponseToShim(req.ctx, prot.RPCModifySettings, req.header.ID, resp)
 			if err != nil {
 				return errors.Wrap(err, "error sending response to hcsshim")
 			}
@@ -712,7 +711,7 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 			// TODO: modify gcs-sidecar code to pass context across all calls
 			// TODO: Update modifyCombinedLayers with verified CimFS API
 			if b.hostState.isSecurityPolicyEnforcerInitialized() {
-				policy_err := modifyCombinedLayers(req.ctx, containerID, guestRequestType, settings.CombinedLayers, b.hostState.securityPolicyEnforcer)
+				policy_err := modifyCombinedLayers(ctx, containerID, guestRequestType, settings.CombinedLayers, b.hostState.securityPolicyEnforcer)
 				if policy_err != nil {
 					return errors.Wrapf(policy_err, "CimFS layer mount is denied by policy: %v", settings)
 				}
@@ -762,13 +761,13 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 
 			// fsFormatter understands only virtualDevObjectPathFormat. Therefore fetch the
 			// disk number for the corresponding lun
-			var diskNumber uint64
+			var devNumber uint32
 			// It could take a few seconds for the attached scsi disk
 			// to show up inside the UVM. Therefore adding retry logic
 			// with delay here.
 			for try := 0; try < 5; try++ {
 				time.Sleep(1 * time.Second)
-				_, diskNumber, err = windevice.GetScsiDevicePathAndDiskNumberFromControllerLUN(req.ctx,
+				devNumber, err = windevice.GetDeviceNumberFromControllerLUN(req.ctx,
 					0, /* Only one controller allowed in wcow hyperv */
 					uint8(wcowMappedVirtualDisk.Lun))
 				if err != nil {
@@ -778,12 +777,12 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 					}
 					continue
 				} else {
-					log.G(ctx).Tracef("DiskNumber of lun %d is:  %d", wcowMappedVirtualDisk.Lun, diskNumber)
+					log.G(ctx).Tracef("DiskNumber of lun %d is:  %d", wcowMappedVirtualDisk.Lun, devNumber)
 					break
 				}
 			}
-			diskPath := fmt.Sprintf(fsformatter.VirtualDevObjectPathFormat, diskNumber)
-			log.G(ctx).Tracef("diskPath: %v, diskNumber: %v ", diskPath, diskNumber)
+			diskPath := fmt.Sprintf(fsformatter.VirtualDevObjectPathFormat, devNumber)
+			log.G(ctx).Tracef("diskPath: %v, diskNumber: %v ", diskPath, devNumber)
 			mountedVolumePath, err := fsformatter.InvokeFsFormatter(req.ctx, diskPath)
 			if err != nil {
 				return errors.Wrap(err, "failed to invoke refsFormatter")

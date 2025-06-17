@@ -131,12 +131,15 @@ type SecurityPolicyEnforcer interface {
 	GetUserInfo(containerID string, spec *oci.Process) (IDName, []IDName, string, error)
 }
 
+// nolint
 type stringSet map[string]struct{}
 
+// nolint
 func (s stringSet) add(item string) {
 	s[item] = struct{}{}
 }
 
+// nolint
 func (s stringSet) contains(item string) bool {
 	_, contains := s[item]
 	return contains

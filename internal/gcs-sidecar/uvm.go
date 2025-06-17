@@ -93,7 +93,7 @@ func unmarshalContainerModifySettings(req *request) (_ *prot.ContainerModifySett
 		case guestresource.ResourceTypeCWCOWCombinedLayers:
 			settings := &guestresource.CWCOWCombinedLayers{}
 			if err := commonutils.UnmarshalJSONWithHresult(rawGuestRequest, settings); err != nil {
-				return nil, errors.Wrap(err, "invalid ResourceTypeCombinedLayers request")
+				return nil, errors.Wrap(err, "invalid ResourceTypeCWCOWCombinedLayers request")
 			}
 			modifyGuestSettingsRequest.Settings = settings
 
@@ -149,7 +149,7 @@ func unmarshalContainerModifySettings(req *request) (_ *prot.ContainerModifySett
 		case guestresource.ResourceTypeMappedVirtualDiskForContainerScratch:
 			wcowMappedVirtualDisk := &guestresource.WCOWMappedVirtualDisk{}
 			if err := commonutils.UnmarshalJSONWithHresult(rawGuestRequest, wcowMappedVirtualDisk); err != nil {
-				return nil, errors.Wrap(err, "invalid ResourceTypeMappedVirtualDisk request")
+				return nil, errors.Wrap(err, "invalid ResourceTypeMappedVirtualDiskForContainerScratch request")
 			}
 			modifyGuestSettingsRequest.Settings = wcowMappedVirtualDisk
 

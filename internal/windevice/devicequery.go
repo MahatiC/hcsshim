@@ -13,11 +13,14 @@ import (
 	"github.com/Microsoft/hcsshim/internal/log"
 	"github.com/Microsoft/hcsshim/internal/winapi"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
 )
 
 const (
-	_CM_GETIDLIST_FILTER_BUSRELATIONS uint32 = 0x00000020
+	_CM_GETIDLIST_FILTER_BUSRELATIONS         uint32 = 0x00000020
+	_CM_GET_DEVICE_INTERFACE_LIST_PRESENT     uint32 = 0x00000000
+	_CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES uint32 = 0x00000001
 
 	_CM_LOCATE_DEVNODE_NORMAL uint32 = 0x00000000
 
@@ -27,8 +30,7 @@ const (
 
 	_DEVPKEY_LOCATIONPATHS_GUID = "a45c254e-df1c-4efd-8020-67d146a850e0"
 
-	_IOCTL_SCSI_GET_ADDRESS = 0x41018
-
+	_IOCTL_SCSI_GET_ADDRESS          = 0x41018
 	_IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2d1080
 )
 
@@ -43,13 +45,6 @@ var (
 	}
 )
 
-// https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-storage_device_number
-type STORAGE_DEVICE_NUMBER struct {
-	DeviceType      uint32
-	DeviceNumber    uint32
-	PartitionNumber uint32
-}
-
 // SCSI_ADDRESS structure used with IOCTL_SCSI_GET_ADDRESS.
 // defined here: https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddscsi/ns-ntddscsi-_scsi_address
 type SCSIAddress struct {
@@ -60,8 +55,16 @@ type SCSIAddress struct {
 	Lun        uint8
 }
 
+// STORAGE_DEVICE_NUMBER structure used with IOCTL_STORAGE_GET_DEVICE_NUMBER
+// https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-storage_device_number
+type StorageDeviceNumber struct {
+	DeviceType      uint32
+	DeviceNumber    uint32
+	PartitionNumber uint32
+}
+
 // getScsiAddress retrieves the SCSI address from a given disk handle
-func getScsiAddress(handle windows.Handle) (*SCSIAddress, error) {
+func getScsiAddress(ctx context.Context, handle windows.Handle) (*SCSIAddress, error) {
 	// Create a SCSI_ADDRESS structure to receive the address information
 	address := &SCSIAddress{}
 	address.Length = uint32(unsafe.Sizeof(SCSIAddress{}))
@@ -83,6 +86,23 @@ func getScsiAddress(handle windows.Handle) (*SCSIAddress, error) {
 		return nil, fmt.Errorf("DeviceIoControl returned %d bytes", bytesReturned)
 	}
 	return address, nil
+}
+
+func getStorageDeviceNumber(ctx context.Context, handle windows.Handle) (*StorageDeviceNumber, error) {
+	var bytesReturned uint32
+	var deviceNumber StorageDeviceNumber
+	if err := windows.DeviceIoControl(
+		handle,
+		_IOCTL_STORAGE_GET_DEVICE_NUMBER,
+		nil, 0, // No input buffer
+		(*byte)(unsafe.Pointer(&deviceNumber)),
+		uint32(unsafe.Sizeof(deviceNumber)),
+		&bytesReturned,
+		nil,
+	); err != nil {
+		return nil, fmt.Errorf("get device number ioctl failed: %w", err)
+	}
+	return &deviceNumber, nil
 }
 
 // getDevPKeyDeviceLocationPaths creates a DEVPROPKEY struct for the
@@ -198,78 +218,91 @@ func getDeviceIDList(pszFilter *byte, ulFlags uint32) ([]string, error) {
 	return winapi.ConvertStringSetToSlice(buf)
 }
 
-func getDeviceHandleFromPath(devPath string) (windows.Handle, error) {
-	utf16Path, err := windows.UTF16PtrFromString(devPath)
-	if err != nil {
-		return windows.Handle(unsafe.Pointer(nil)), fmt.Errorf("failed to convert interface path [%s] to utf16: %w", devPath, err)
-	}
+// A device interface class represents a conceptual functionality that any device in that
+// class should support or represent such as a particular I/O contract. There are several
+// predefined interface classes and each class is identified by its own unique GUID. A
+// single device can implement/support multiple interface classes and there can be
+// multiple devices in the system that implement/support a particular interface class. A
+// device that implements a particular interface class is referred to as a device
+// interface instance. (For further details see:
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/install/overview-of-device-interface-classes).
+//
+// getDeviceInterfaceInstancesByClass retrieves a list of device interface instances for
+// all the devices that are currently attached to the system filtered by the given
+// interface class(`interfaceClassGUID`). By default this only returns the list of devices
+// that are currently attached to the system. If `includeNonAttached` is true, includes
+// the devices that the system has seen earlier but aren't currently attached.
+//
+// For further details see: https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_device_interface_lista
+func getDeviceInterfaceInstancesByClass(ctx context.Context, interfaceClassGUID *guid.GUID, includeNonAttached bool) (_ []string, err error) {
+	log.G(ctx).WithFields(logrus.Fields{
+		"inteface class":     interfaceClassGUID,
+		"includeNonAttached": includeNonAttached,
+	}).Debugf("get device interface instances by class")
 
-	handle, err := windows.CreateFile(utf16Path, windows.GENERIC_READ|windows.GENERIC_WRITE,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
-		nil, windows.OPEN_EXISTING, 0, 0)
-	if err != nil {
-		return windows.Handle(unsafe.Pointer(nil)), fmt.Errorf("failed to get handle to interface path [%s]: %w", devPath, err)
-	}
-	return handle, nil
-}
-
-func getDeviceInterfaceList(ctx context.Context, controller, lun uint8) ([]string, error) {
-	// get a list of all disk device interfaces
 	interfaceListSize := uint32(0)
-	if err := winapi.CMGetDeviceInterfaceListSize(&interfaceListSize, &devClassDiskGUID, nil, 0); err != nil {
-		return nil, fmt.Errorf("failed to get size of disk device interface list: %w", err)
+	ulFlags := _CM_GET_DEVICE_INTERFACE_LIST_PRESENT
+	if includeNonAttached {
+		ulFlags = _CM_GET_DEVICE_INTERFACE_LIST_ALL_DEVICES
 	}
+
+	if err := winapi.CMGetDeviceInterfaceListSize(&interfaceListSize, interfaceClassGUID, nil, ulFlags); err != nil {
+		return nil, fmt.Errorf("failed to get size of device interface list: %w", err)
+	}
+
+	log.G(ctx).WithField("interface list size", interfaceListSize).Trace("retrieved device interface list size")
 
 	buf := make([]uint16, interfaceListSize)
 	if err := winapi.CMGetDeviceInterfaceList(&devClassDiskGUID, nil, &buf[0], interfaceListSize, 0); err != nil {
-		return nil, fmt.Errorf("failed to get disk device interface list: %w", err)
+		return nil, fmt.Errorf("failed to get device interface list: %w", err)
 	}
-
-	interfacePaths := convertNullSeparatedUint16BufToStringSlice(buf)
-	log.G(ctx).Debugf("disk device interface list size: %d", len(interfacePaths))
-	log.G(ctx).WithField("list", interfacePaths).Trace("disk device interfaces")
-
-	return interfacePaths, nil
+	return convertNullSeparatedUint16BufToStringSlice(buf), nil
 }
 
-// GetScsiDevicePathAndDiskNumberFromControllerLUN finds a storage device that has the matching
-// `controller` and `LUN` and returns its scsi device path and corresponding disk number.
-func GetScsiDevicePathAndDiskNumberFromControllerLUN(ctx context.Context, controller, LUN uint8) (string, uint64, error) {
-	interfacePaths, err := getDeviceInterfaceList(ctx, controller, LUN)
+// GetDeviceNumberFromControllerLUN finds the storage device that has a matching
+// `controller` and `LUN` and returns a physical device number of that device. This device
+// number can then be used to make a path of that device and open handles to that device,
+// mount that disk etc.
+func GetDeviceNumberFromControllerLUN(ctx context.Context, controller, LUN uint8) (uint32, error) {
+	interfacePaths, err := getDeviceInterfaceInstancesByClass(ctx, &devClassDiskGUID, false)
 	if err != nil {
-		return "", 0, err
+		return 0, fmt.Errorf("failed to get device interface instances: %w", err)
 	}
+
+	log.G(ctx).Debugf("disk device interface list: %+v", interfacePaths)
+
 	// go over each disk device interface and find out its LUN
 	for _, iPath := range interfacePaths {
-		handle, err := getDeviceHandleFromPath(iPath)
+		utf16Path, err := windows.UTF16PtrFromString(iPath)
 		if err != nil {
-			return "", 0, err
+			return 0, fmt.Errorf("failed to convert interface path [%s] to utf16: %w", iPath, err)
+		}
+
+		handle, err := windows.CreateFile(utf16Path, windows.GENERIC_READ|windows.GENERIC_WRITE,
+			windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+			nil, windows.OPEN_EXISTING, 0, 0)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get handle to interface path [%s]: %w", iPath, err)
 		}
 		defer windows.Close(handle)
 
-		scsiAddr, err := getScsiAddress(handle)
+		scsiAddr, err := getScsiAddress(ctx, handle)
 		if err != nil {
-			return "", 0, fmt.Errorf("failed to get SCSI address for interface path [%s]: %w", iPath, err)
+			return 0, fmt.Errorf("failed to get SCSI address for interface path [%s]: %w", iPath, err)
 		}
+		log.G(ctx).WithFields(logrus.Fields{
+			"device interface path": iPath,
+			"scsi address":          scsiAddr,
+		}).Trace("scsi path from device interface path")
 
-		// TODO(ambarve): is comparing controller with port number the correct way?
+		//TODO(ambarve): is comparing controller with port number the correct way?
 		if scsiAddr.Lun == LUN && scsiAddr.PortNumber == controller {
-			// get the disk number
-			var bytesReturned uint32
-			var deviceNumber STORAGE_DEVICE_NUMBER
-			if err := windows.DeviceIoControl(
-				handle,
-				_IOCTL_STORAGE_GET_DEVICE_NUMBER,
-				nil, 0, // No input buffer
-				(*byte)(unsafe.Pointer(&deviceNumber)),
-				uint32(unsafe.Sizeof(deviceNumber)),
-				&bytesReturned,
-				nil,
-			); err != nil {
-				return "", 0, err
+			deviceNumber, err := getStorageDeviceNumber(ctx, handle)
+			if err != nil {
+				return 0, fmt.Errorf("failed to get physical device number: %w", err)
 			}
-			return iPath, uint64(deviceNumber.DeviceNumber), nil
+			return deviceNumber.DeviceNumber, nil
 		}
 	}
-	return "", 0, fmt.Errorf("no device found with controller: %d & LUN:%d", controller, LUN)
+	return 0, fmt.Errorf("no device found with controller: %d & LUN:%d", controller, LUN)
 }

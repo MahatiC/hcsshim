@@ -70,22 +70,19 @@ func (h *handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	status <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 
 loop:
-	for {
-		select {
-		case c := <-r:
-			switch c.Cmd {
-			case svc.Interrogate:
-				status <- c.CurrentStatus
-			case svc.Stop, svc.Shutdown:
-				logrus.Println("Shutting service...!")
-				break loop
-			case svc.Pause:
-				status <- svc.Status{State: svc.Paused, Accepts: cmdsAccepted}
-			case svc.Continue:
-				status <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
-			default:
-				logrus.Printf("Unexpected service control request #%d", c)
-			}
+	for c := range r {
+		switch c.Cmd {
+		case svc.Interrogate:
+			status <- c.CurrentStatus
+		case svc.Stop, svc.Shutdown:
+			logrus.Println("Shutting service...!")
+			break loop
+		case svc.Pause:
+			status <- svc.Status{State: svc.Paused, Accepts: cmdsAccepted}
+		case svc.Continue:
+			status <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+		default:
+			logrus.Printf("Unexpected service control request #%d", c)
 		}
 	}
 
@@ -101,14 +98,14 @@ func runService(name string, isDebug bool) error {
 	var err error
 	go func() {
 		if isDebug {
-			err := debug.Run(name, h)
+			err = debug.Run(name, h)
 			if err != nil {
-				logrus.Fatalf("Error running service in debug mode.Err: %v", err)
+				logrus.Errorf("Error running service in debug mode.Err: %v", err)
 			}
 		} else {
-			err := svc.Run(name, h)
+			err = svc.Run(name, h)
 			if err != nil {
-				logrus.Fatalf("Error running service in Service Control mode.Err %v", err)
+				logrus.Errorf("Error running service in Service Control mode.Err %v", err)
 			}
 		}
 		h.fromsvc <- err
@@ -116,12 +113,7 @@ func runService(name string, isDebug bool) error {
 
 	// Wait for the first signal from the service handler.
 	logrus.Tracef("waiting for first signal from service handler\n")
-	err = <-h.fromsvc
-	if err != nil {
-		return err
-	}
-	return nil
-
+	return <-h.fromsvc
 }
 
 func main() {
@@ -170,7 +162,7 @@ func main() {
 		defer close(chsrv)
 
 		if err := runService("gcs-sidecar", false); err != nil {
-			logrus.Fatalf("error starting gcs-sidecar service: %v", err)
+			logrus.Errorf("error starting gcs-sidecar service: %v", err)
 		}
 
 		chsrv <- err
@@ -178,18 +170,18 @@ func main() {
 
 	select {
 	case <-ctx.Done():
-		logrus.Fatalln("context deadline exceeded")
+		logrus.Error("context deadline exceeded")
 		return
 	case r := <-chsrv:
 		if r != nil {
-			logrus.Fatal(r)
+			logrus.Error(r)
 			return
 		}
 	}
 
 	// 1. Start external server to connect with inbox GCS
 	listener, err := winio.ListenHvsock(&winio.HvsockAddr{
-		VMID:      prot.HV_GUID_LOOPBACK,
+		VMID:      prot.HvGUIDLoopback,
 		ServiceID: prot.WindowsGcsHvsockServiceID,
 	})
 	if err != nil {
@@ -197,8 +189,7 @@ func main() {
 		return
 	}
 
-	var gcsListener net.Listener
-	gcsListener = listener
+	var gcsListener net.Listener = listener
 	gcsCon, err := acceptAndClose(ctx, gcsListener)
 	if err != nil {
 		logrus.WithError(err).Errorf("error accepting inbox GCS connection")
@@ -207,7 +198,7 @@ func main() {
 
 	// 2. Setup connection with external gcs connection started from hcsshim
 	hvsockAddr := &winio.HvsockAddr{
-		VMID:      prot.HV_GUID_PARENT,
+		VMID:      prot.HvGUIDParent,
 		ServiceID: prot.WindowsSidecarGcsHvsockServiceID,
 	}
 
@@ -219,6 +210,7 @@ func main() {
 		logrus.WithError(err).Errorf("error dialing hcsshim external bridge")
 		return
 	}
+
 	// gcs-sidecar can be used for non-confidentail hyperv wcow
 	// as well. So we do not always want to check for initialPolicyStance
 	var initialEnforcer securitypolicy.SecurityPolicyEnforcer
