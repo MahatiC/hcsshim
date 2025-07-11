@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"path/filepath"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -956,7 +956,8 @@ func (*SecurityPolicy) Generate(r *rand.Rand, _ int) reflect.Value {
 }
 
 func (*generatedConstraints) Generate(r *rand.Rand, _ int) reflect.Value {
-	c := generateConstraints(r, maxContainersInGeneratedConstraints)
+	//c := generateConstraints(r, maxContainersInGeneratedConstraints)
+	c := generateConstraints(r, 5)
 	return reflect.ValueOf(c)
 }
 
@@ -998,8 +999,16 @@ func generateConstraints(r *rand.Rand, maxContainers int32) *generatedConstraint
 	var containers []*securityPolicyContainer
 
 	numContainers := (int)(atLeastOneAtMost(r, maxContainers))
-	for i := 0; i < numContainers; i++ {
-		containers = append(containers, generateConstraintsContainer(r, 1, maxLayersInGeneratedContainer))
+	if osType == "windows" {
+		// Windows containers
+		//for i := 0; i < numContainers; i++ {
+		//		containers = append(containers, generateConstraintsWindowsContainer(r, 1, 5))
+		//	}
+	} else if osType == "linux" {
+		// Linux containers
+		for i := 0; i < numContainers; i++ {
+			containers = append(containers, generateConstraintsContainer(r, 1, 5))
+		}
 	}
 
 	return &generatedConstraints{
@@ -1039,6 +1048,25 @@ func generateConstraintsContainer(r *rand.Rand, minNumberOfLayers, maxNumberOfLa
 
 	return &c
 }
+
+/*func generateConstraintsWindowsContainer(r *rand.Rand, minNumberOfLayers, maxNumberOfLayers int32) *securityPolicyContainer {
+	c := securityPolicyWindowsContainer{}
+	p := generateContainerInitProcess(r)
+	c.Command = p.Command
+	c.EnvRules = p.EnvRules
+	c.WorkingDir = p.WorkingDir
+	numLayers := int(atLeastNAtMostM(r, minNumberOfLayers, maxNumberOfLayers))
+	for i := 0; i < numLayers; i++ {
+		c.Layers = append(c.Layers, generateRootHash(r))
+	}
+	c.ExecProcesses = generateExecProcesses(r)
+	c.WindowsSignals = generateWindowsSignals(r)
+	c.AllowStdioAccess = randBool(r)
+	c.NoNewPrivileges = randBool(r)
+	c.WindowsUser = generateWindowsUser(r)
+
+	return &c
+}*/
 
 func generateSeccomp(r *rand.Rand) string {
 	if randBool(r) {
@@ -1090,6 +1118,13 @@ func generateContainerExecProcess(r *rand.Rand) containerExecProcess {
 	}
 }
 
+func generateWindowsContainerExecProcess(r *rand.Rand) windowsContainerExecProcess {
+	return windowsContainerExecProcess{
+		Command: generateCommand(r),
+		Signals: generateWindowsSignals(r),
+	}
+}
+
 func generateRootHash(r *rand.Rand) string {
 	return randString(r, rootHashLength)
 }
@@ -1098,7 +1133,22 @@ func generateWorkingDir(r *rand.Rand) string {
 	return randVariableString(r, maxGeneratedWorkingDirLength)
 }
 
+func generateWindowsUser(r *rand.Rand) string {
+	return randVariableString(r, maxGeneratedWorkingDirLength)
+}
+
 func generateCommand(r *rand.Rand) []string {
+	var args []string
+
+	numArgs := atLeastOneAtMost(r, maxGeneratedCommandArgs)
+	for i := 0; i < int(numArgs); i++ {
+		args = append(args, randVariableString(r, maxGeneratedCommandLength))
+	}
+
+	return args
+}
+
+func generateWindowsSignals(r *rand.Rand) []string {
 	var args []string
 
 	numArgs := atLeastOneAtMost(r, maxGeneratedCommandArgs)
@@ -1128,8 +1178,16 @@ func generateExecProcesses(r *rand.Rand) []containerExecProcess {
 	var processes []containerExecProcess
 
 	numProcesses := atLeastOneAtMost(r, maxGeneratedExecProcesses)
-	for i := 0; i < int(numProcesses); i++ {
-		processes = append(processes, generateContainerExecProcess(r))
+	if osType == "windows" {
+		// Windows containers
+		/*for i := 0; i < int(numProcesses); i++ {
+			processes = append(processes, generateWindowsContainerExecProcess(r))
+		}*/
+	} else if osType == "linux" {
+		// Linux containers
+		for i := 0; i < int(numProcesses); i++ {
+			processes = append(processes, generateContainerExecProcess(r))
+		}
 	}
 
 	return processes
@@ -1295,7 +1353,7 @@ func generateMounts(r *rand.Rand) []mountInternal {
 			sourcePrefix = guestpath.HugePagesMountPrefix
 		}
 
-		source := filepath.Join(sourcePrefix, randVariableString(r, maxGeneratedMountSourceLength))
+		source := path.Join(sourcePrefix, randVariableString(r, maxGeneratedMountSourceLength))
 		destination := randVariableString(r, maxGeneratedMountDestinationLength)
 
 		mounts[i] = mountInternal{

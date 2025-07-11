@@ -4,6 +4,7 @@ package uvm
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"maps"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/Microsoft/hcsshim/pkg/securitypolicy"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/trace"
@@ -365,11 +367,25 @@ func prepareSecurityConfigDoc(ctx context.Context, uvm *UtilityVM, opts *Options
 		}
 	}
 
+	// Part of the protocol to ensure that the rules in the user's Security Policy are
+	// respected is to provide a hash of the policy to the hardware. This is immutable
+	// and can be used to check that the policy used by opengcs is the required one as
+	// a condition of releasing secrets to the container.
+
+	policyDigest, err := securitypolicy.NewSecurityPolicyDigest(opts.SecurityPolicy)
+	if err != nil {
+		return nil, err
+	}
+	// HCS API expect a base64 encoded string as LaunchData. Internally it
+	// decodes it to bytes. SEV later returns the decoded byte blob as HostData
+	// field of the report.
+	hostData := base64.StdEncoding.EncodeToString(policyDigest)
 	enableHCL := true
 	doc.VirtualMachine.SecuritySettings = &hcsschema.SecuritySettings{
 		EnableTpm: false,
 		Isolation: &hcsschema.IsolationSettings{
 			IsolationType: "SecureNestedPaging",
+			LaunchData:    hostData,
 			HclEnabled:    &enableHCL,
 		},
 	}

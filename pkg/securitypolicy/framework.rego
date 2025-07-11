@@ -529,13 +529,10 @@ create_container := {"metadata": [updateMatches, addStarted],
         # NB any change to these narrowing conditions should be reflected in
         # the error handling, such that error messaging correctly reflects
         # the narrowing process.
-        noNewPrivileges_ok(container.no_new_privileges)
+        security_ok(container)
         user_ok(container.user)
-        privileged_ok(container.allow_elevated)
         workingDirectory_ok(container.working_dir)
         command_ok(container.command)
-        mountList_ok(container.mounts, container.allow_elevated)
-        seccomp_ok(container.seccomp_profile_sha256)
     ]
 
     count(possible_after_initial_containers) > 0
@@ -552,7 +549,7 @@ create_container := {"metadata": [updateMatches, addStarted],
 
     # check to see if the capabilities variables match, dropping
     # them if allowed (and necessary)
-    caps_result := possible_container_after_caps(possible_after_env_containers, input.privileged)
+    caps_result := possible_container_after_caps(possible_after_env_containers)
 
     possible_after_caps_containers := caps_result.containers
     caps_list := caps_result.caps_list
@@ -587,22 +584,35 @@ create_container := {"metadata": [updateMatches, addStarted],
         },
     }
 }
-possible_container_after_caps(env_containers, privileged) := {
+
+security_ok(current_container) {
+    is_linux
+    noNewPrivileges_ok(current_container.no_new_privileges)
+    privileged_ok(current_container.allow_elevated)
+    seccomp_ok(current_container.seccomp_profile_sha256)
+    mountList_ok(current_container.mounts, current_container.allow_elevated)
+}
+
+security_ok(current_container) {
+    is_windows
+}
+
+possible_container_after_caps(env_containers) := {
     "containers": env_containers,
     "caps_list": []
 } {
     is_windows
 }
 
-possible_container_after_caps(env_containers, privileged) := {
+possible_container_after_caps(env_containers) := {
     "containers": filtered,
     "caps_list": caps_list
 } {
     is_linux
-    caps_list := valid_caps_for_all(env_containers, privileged)
+    caps_list := valid_caps_for_all(env_containers, input.privileged)
     filtered := [container |
         container := env_containers[_]
-        caps_ok(get_capabilities(container, privileged), caps_list)
+        caps_ok(get_capabilities(container, input.privileged), caps_list)
     ]
 }
 
