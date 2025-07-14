@@ -188,6 +188,11 @@ type ExecProcessConfig struct {
 	Signals []syscall.Signal `json:"signals" toml:"signals"`
 }
 
+type WindowsExecProcessConfig struct {
+	Command []string `json:"command" toml:"command"`
+	Signals []string `json:"signals" toml:"signals"`
+}
+
 // CapabilitiesConfig contains the toml or JSON config for capabilies security
 // polict constraint description
 type CapabilitiesConfig struct {
@@ -255,7 +260,8 @@ type SecurityPolicy struct {
 	// everything".
 	AllowAll bool `json:"allow_all"`
 	// One or more containers that are allowed to run
-	Containers Containers `json:"containers"`
+	Containers        Containers        `json:"containers"`
+	WindowsContainers WindowsContainers `json:"windows_containers"`
 }
 
 // EncodeToString returns base64 encoded string representation of SecurityPolicy.
@@ -272,6 +278,11 @@ type Containers struct {
 	Elements map[string]Container `json:"elements"`
 }
 
+type WindowsContainers struct {
+	Length   int                         `json:"length"`
+	Elements map[string]WindowsContainer `json:"elements"`
+}
+
 type Container struct {
 	Command              CommandArgs         `json:"command"`
 	EnvRules             EnvRules            `json:"env_rules"`
@@ -286,6 +297,17 @@ type Container struct {
 	User                 UserConfig          `json:"-"`
 	Capabilities         *CapabilitiesConfig `json:"-"`
 	SeccompProfileSHA256 string              `json:"-"`
+}
+
+type WindowsContainer struct {
+	Command          CommandArgs                `json:"command"`
+	EnvRules         EnvRules                   `json:"env_rules"`
+	Layers           Layers                     `json:"layers"`
+	WorkingDir       string                     `json:"working_dir"`
+	ExecProcesses    []WindowsExecProcessConfig `json:"-"`
+	Signals          []string                   `json:"-"`
+	AllowStdioAccess bool                       `json:"-"`
+	User             string                     `json:"-"`
 }
 
 // StringArrayMap wraps an array of strings as a string map.

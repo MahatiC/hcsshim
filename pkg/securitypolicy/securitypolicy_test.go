@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"path/filepath"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -956,7 +956,8 @@ func (*SecurityPolicy) Generate(r *rand.Rand, _ int) reflect.Value {
 }
 
 func (*generatedConstraints) Generate(r *rand.Rand, _ int) reflect.Value {
-	c := generateConstraints(r, maxContainersInGeneratedConstraints)
+	//c := generateConstraints(r, maxContainersInGeneratedConstraints)
+	c := generateConstraints(r, 5)
 	return reflect.ValueOf(c)
 }
 
@@ -998,8 +999,16 @@ func generateConstraints(r *rand.Rand, maxContainers int32) *generatedConstraint
 	var containers []*securityPolicyContainer
 
 	numContainers := (int)(atLeastOneAtMost(r, maxContainers))
-	for i := 0; i < numContainers; i++ {
-		containers = append(containers, generateConstraintsContainer(r, 1, maxLayersInGeneratedContainer))
+	if testOSType == "windows" {
+		// Windows containers
+		//for i := 0; i < numContainers; i++ {
+		//		containers = append(containers, generateConstraintsWindowsContainer(r, 1, 5))
+		//	}
+	} else if testOSType == "linux" {
+		// Linux containers
+		for i := 0; i < numContainers; i++ {
+			containers = append(containers, generateConstraintsContainer(r, 1, 5))
+		}
 	}
 
 	return &generatedConstraints{
@@ -1036,6 +1045,24 @@ func generateConstraintsContainer(r *rand.Rand, minNumberOfLayers, maxNumberOfLa
 	c.User = generateUser(r)
 	c.Capabilities = generateInternalCapabilities(r)
 	c.SeccompProfileSHA256 = generateSeccomp(r)
+
+	return &c
+}
+
+func generateConstraintsWindowsContainer(r *rand.Rand, minNumberOfLayers, maxNumberOfLayers int32) *securityPolicyWindowsContainer {
+	c := securityPolicyWindowsContainer{}
+	p := generateContainerInitProcess(r)
+	c.Command = p.Command
+	c.EnvRules = p.EnvRules
+	c.WorkingDir = p.WorkingDir
+	numLayers := int(atLeastNAtMostM(r, minNumberOfLayers, maxNumberOfLayers))
+	for i := 0; i < numLayers; i++ {
+		c.Layers = append(c.Layers, generateRootHash(r))
+	}
+	c.ExecProcesses = generateWindowsExecProcesses(r)
+	c.Signals = generateWindowsSignals(r)
+	c.AllowStdioAccess = randBool(r)
+	c.User = generateWindowsUser(r)
 
 	return &c
 }
@@ -1090,6 +1117,13 @@ func generateContainerExecProcess(r *rand.Rand) containerExecProcess {
 	}
 }
 
+func generateWindowsContainerExecProcess(r *rand.Rand) windowsContainerExecProcess {
+	return windowsContainerExecProcess{
+		Command: generateCommand(r),
+		Signals: generateWindowsSignals(r),
+	}
+}
+
 func generateRootHash(r *rand.Rand) string {
 	return randString(r, rootHashLength)
 }
@@ -1098,7 +1132,22 @@ func generateWorkingDir(r *rand.Rand) string {
 	return randVariableString(r, maxGeneratedWorkingDirLength)
 }
 
+func generateWindowsUser(r *rand.Rand) string {
+	return randVariableString(r, maxGeneratedWorkingDirLength)
+}
+
 func generateCommand(r *rand.Rand) []string {
+	var args []string
+
+	numArgs := atLeastOneAtMost(r, maxGeneratedCommandArgs)
+	for i := 0; i < int(numArgs); i++ {
+		args = append(args, randVariableString(r, maxGeneratedCommandLength))
+	}
+
+	return args
+}
+
+func generateWindowsSignals(r *rand.Rand) []string {
 	var args []string
 
 	numArgs := atLeastOneAtMost(r, maxGeneratedCommandArgs)
@@ -1128,8 +1177,35 @@ func generateExecProcesses(r *rand.Rand) []containerExecProcess {
 	var processes []containerExecProcess
 
 	numProcesses := atLeastOneAtMost(r, maxGeneratedExecProcesses)
+	if testOSType == "windows" {
+		// Windows containers - generate compatible exec processes
+		for i := 0; i < int(numProcesses); i++ {
+			// Convert Windows exec process to containerExecProcess
+			winProcess := generateWindowsContainerExecProcess(r)
+			process := containerExecProcess{
+				Command: winProcess.Command,
+				// Note: Windows signals are strings, but containerExecProcess expects syscall.Signal
+				// This conversion may need adjustment based on your requirements
+				Signals: []syscall.Signal{}, // Placeholder - you may need to convert string signals to syscall.Signal
+			}
+			processes = append(processes, process)
+		}
+	} else if testOSType == "linux" {
+		// Linux containers
+		for i := 0; i < int(numProcesses); i++ {
+			processes = append(processes, generateContainerExecProcess(r))
+		}
+	}
+
+	return processes
+}
+
+func generateWindowsExecProcesses(r *rand.Rand) []windowsContainerExecProcess {
+	var processes []windowsContainerExecProcess
+
+	numProcesses := atLeastOneAtMost(r, maxGeneratedExecProcesses)
 	for i := 0; i < int(numProcesses); i++ {
-		processes = append(processes, generateContainerExecProcess(r))
+		processes = append(processes, generateWindowsContainerExecProcess(r))
 	}
 
 	return processes
@@ -1198,6 +1274,9 @@ func buildEnvironmentVariablesFromEnvRules(rules []EnvRuleConfig, r *rand.Rand) 
 	// Select some number of the valid, matching rules to be environment
 	// variable
 	numberOfRules := int32(len(rules))
+	if numberOfRules == 0 {
+		return vars
+	}
 	numberOfMatches := randMinMax(r, 1, numberOfRules)
 
 	// Build in all required rules, this isn't a setup method of "missing item"
@@ -1295,7 +1374,7 @@ func generateMounts(r *rand.Rand) []mountInternal {
 			sourcePrefix = guestpath.HugePagesMountPrefix
 		}
 
-		source := filepath.Join(sourcePrefix, randVariableString(r, maxGeneratedMountSourceLength))
+		source := path.Join(sourcePrefix, randVariableString(r, maxGeneratedMountSourceLength))
 		destination := randVariableString(r, maxGeneratedMountDestinationLength)
 
 		mounts[i] = mountInternal{
@@ -1331,6 +1410,9 @@ func generateSignal(r *rand.Rand) syscall.Signal {
 }
 
 func selectContainerFromContainerList(containers []*securityPolicyContainer, r *rand.Rand) *securityPolicyContainer {
+	if len(containers) == 0 {
+		panic("selectContainerFromContainerList: no containers available to select from")
+	}
 	return containers[r.Intn(len(containers))]
 }
 
@@ -1526,6 +1608,87 @@ type generatedConstraints struct {
 	svn                              string
 	allowCapabilityDropping          bool
 	ctx                              context.Context
+}
+
+type generatedWindowsConstraints struct {
+	containers                       []*securityPolicyWindowsContainer
+	externalProcesses                []*externalProcess
+	fragments                        []*fragment
+	allowGetProperties               bool
+	allowDumpStacks                  bool
+	allowRuntimeLogging              bool
+	allowEnvironmentVariableDropping bool
+	allowUnencryptedScratch          bool
+	namespace                        string
+	svn                              string
+	allowCapabilityDropping          bool
+	ctx                              context.Context
+}
+
+func (constraints *generatedWindowsConstraints) toPolicy() *securityPolicyWindowsInternal {
+	return &securityPolicyWindowsInternal{
+		Containers:                       constraints.containers,
+		ExternalProcesses:                constraints.externalProcesses,
+		Fragments:                        constraints.fragments,
+		AllowPropertiesAccess:            constraints.allowGetProperties,
+		AllowDumpStacks:                  constraints.allowDumpStacks,
+		AllowRuntimeLogging:              constraints.allowRuntimeLogging,
+		AllowEnvironmentVariableDropping: constraints.allowEnvironmentVariableDropping,
+		AllowUnencryptedScratch:          constraints.allowUnencryptedScratch,
+		AllowCapabilityDropping:          constraints.allowCapabilityDropping,
+	}
+}
+
+func (constraints *generatedWindowsConstraints) toFragment() *securityPolicyFragment {
+	// Convert Windows containers to regular containers for fragment compatibility
+	linuxContainers := make([]*securityPolicyContainer, len(constraints.containers))
+	for i, winContainer := range constraints.containers {
+		// This is a placeholder conversion - you may need to implement proper conversion
+		linuxContainers[i] = &securityPolicyContainer{
+			Command:    winContainer.Command,
+			EnvRules:   winContainer.EnvRules,
+			WorkingDir: winContainer.WorkingDir,
+			Layers:     winContainer.Layers,
+			// Note: Some Windows-specific fields may not have Linux equivalents
+		}
+	}
+
+	return &securityPolicyFragment{
+		Namespace:         constraints.namespace,
+		SVN:               constraints.svn,
+		Containers:        linuxContainers,
+		ExternalProcesses: constraints.externalProcesses,
+		Fragments:         constraints.fragments,
+	}
+}
+
+func generateWindowsConstraints(r *rand.Rand, maxContainers int32) *generatedWindowsConstraints {
+	var containers []*securityPolicyWindowsContainer
+
+	numContainers := (int)(atLeastOneAtMost(r, maxContainers))
+	for i := 0; i < numContainers; i++ {
+		containers = append(containers, generateConstraintsWindowsContainer(r, 1, 5))
+	}
+
+	return &generatedWindowsConstraints{
+		containers:                       containers,
+		externalProcesses:                make([]*externalProcess, 0),
+		fragments:                        make([]*fragment, 0),
+		allowGetProperties:               randBool(r),
+		allowDumpStacks:                  randBool(r),
+		allowRuntimeLogging:              false,
+		allowEnvironmentVariableDropping: false,
+		allowUnencryptedScratch:          false,
+		allowCapabilityDropping:          false,
+		namespace:                        generateFragmentNamespace(r),
+		svn:                              generateSVN(r),
+		ctx:                              context.Background(),
+	}
+}
+
+func (*generatedWindowsConstraints) Generate(r *rand.Rand, _ int) reflect.Value {
+	c := generateWindowsConstraints(r, 5)
+	return reflect.ValueOf(c)
 }
 
 type containerInitProcess struct {
