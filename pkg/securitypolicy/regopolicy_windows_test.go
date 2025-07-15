@@ -31,18 +31,7 @@ func Test_Rego_EnforceCreateContainer_Windows(t *testing.T) {
 
 		os.WriteFile("expected-policy.json", []byte(p.toPolicy().marshalWindowsRego()), 0644)
 
-		// Create proper options for Windows container
-		opts := &CreateContainerOptions{
-			SandboxID:            testDataGenerator.uniqueSandboxID(),
-			Privileged:           &[]bool{false}[0], // false pointer
-			NoNewPrivileges:      &[]bool{true}[0],  // true pointer  
-			Groups:               []IDName{},
-			Umask:                "",
-			Capabilities:         nil, // Windows doesn't use Linux capabilities
-			SeccompProfileSHA256: "",
-		}
-
-		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(p.ctx, tc.containerID, tc.argList, tc.envList, tc.workingDir, tc.mounts, tc.user, opts)
+		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(p.ctx, tc.containerID, tc.argList, tc.envList, tc.workingDir, tc.mounts, tc.user, nil)
 
 		if err != nil {
 			t.Errorf("Policy enforcement failed: %v", err)
@@ -66,22 +55,13 @@ func Test_Rego_EnforceCommandPolicy_NoMatches_Windows(t *testing.T) {
 
 		//_, _, _, err = tc.policy.EnforceCreateContainerPolicy(p.ctx, tc.sandboxID, tc.containerID, generateCommand(testRand), tc.envList, tc.workingDir, tc.mounts, false, tc.noNewPrivileges, tc.user, tc.groups, tc.umask, tc.capabilities, tc.seccomp)
 
-		// Create proper options for Windows container
-		opts := &CreateContainerOptions{
-			SandboxID:            testDataGenerator.uniqueSandboxID(),
-			Privileged:           &[]bool{false}[0], // false pointer
-			NoNewPrivileges:      &[]bool{true}[0],  // true pointer  
-			Groups:               []IDName{},
-			Umask:                "",
-			Capabilities:         nil, // Windows doesn't use Linux capabilities
-			SeccompProfileSHA256: "",
-		}
-
-		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(p.ctx, tc.containerID, generateCommand(testRand), tc.envList, tc.workingDir, tc.mounts, tc.user, opts)
+		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(p.ctx, tc.containerID, generateCommand(testRand), tc.envList, tc.workingDir, tc.mounts, tc.user, nil)
 
 		if err == nil {
 			return false
 		}
+
+		t.Logf("Error value: %v", err)
 
 		return assertDecisionJSONContains(t, err, "invalid command")
 	}
@@ -91,68 +71,68 @@ func Test_Rego_EnforceCommandPolicy_NoMatches_Windows(t *testing.T) {
 	}
 }
 
-func Test_Rego_EnforceCreateContainer_sample(t *testing.T) {
-	// Create a simple Windows container for testing with no env rules to reduce complexity
-	simpleContainer := &securityPolicyWindowsContainer{
-		Command:          []string{"cmd.exe", "/c", "echo hello"},
-		EnvRules:         []EnvRuleConfig{}, // No environment variable rules
-		WorkingDir:       "C:",
-		Layers:           []string{"layer1", "layer2"},
-		AllowStdioAccess: true,
-		User:             "testuser",
+func Test_Rego_EnforceEnvironmentVariablePolicy_Re2Match_Windows(t *testing.T) {
+	testFunc := func(gc *generatedWindowsConstraints) bool {
+		container := selectWindowsContainerFromContainerList(gc.containers, testRand)
+		// add a rule to re2 match
+		re2MatchRule := EnvRuleConfig{
+			Strategy: EnvVarRuleRegex,
+			Rule:     "PREFIX_.+=.+",
+		}
+
+		container.EnvRules = append(container.EnvRules, re2MatchRule)
+
+		tc, err := setupRegoCreateContainerTestWindows(gc, container, false)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		envList := append(tc.envList, "PREFIX_FOO=BAR")
+
+		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(gc.ctx, tc.containerID, tc.argList, envList, tc.workingDir, tc.mounts, tc.user, nil)
+
+		// getting an error means something is broken
+		if err != nil {
+			t.Errorf("Expected container setup to be allowed. It wasn't: %v", err)
+			return false
+		}
+
+		return true
 	}
 
-	// Create constraints with the simple container
-	constraints := &generatedWindowsConstraints{
-		containers:                       []*securityPolicyWindowsContainer{simpleContainer},
-		externalProcesses:                []*externalProcess{},
-		fragments:                        []*fragment{},
-		allowGetProperties:               false,
-		allowDumpStacks:                  false,
-		allowRuntimeLogging:              false,
-		allowEnvironmentVariableDropping: false,
-		allowUnencryptedScratch:          false,
-		namespace:                        "test",
-		svn:                              "1",
-		allowCapabilityDropping:          false,
-		ctx:                              context.Background(),
+	if err := quick.Check(testFunc, &quick.Config{MaxCount: 50, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_EnforceEnvironmentVariablePolicy_Re2Match: %v", err)
+	}
+}
+
+func Test_Rego_EnforceEnvironmentVariablePolicy_NotAllMatches_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		tc, err := setupSimpleRegoCreateContainerTestWindows(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		envList := append(tc.envList, generateNeverMatchingEnvironmentVariable(testRand))
+
+		_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(p.ctx, tc.containerID, tc.argList, envList, tc.workingDir, tc.mounts, tc.user, nil)
+
+		// not getting an error means something is broken
+		if err == nil {
+			return false
+		}
+
+		return assertDecisionJSONContains(t, err, "invalid env list", envList[0])
 	}
 
-	tc, err := setupSimpleRegoCreateContainerTestWindows(constraints)
-	if err != nil {
-		t.Fatalf("Setup failed: %v", err)
-	}
-
-	t.Logf("Selected container ID: %s", tc.containerID)
-	t.Logf("User config: %+v", tc.user)
-	t.Logf("Container details: cmd=%v, env=%v, workdir='%s'", tc.argList, tc.envList, tc.workingDir)
-
-	// Create proper options for Windows container
-	opts := &CreateContainerOptions{
-		SandboxID:            testDataGenerator.uniqueSandboxID(),
-		Privileged:           &[]bool{false}[0], // false pointer
-		NoNewPrivileges:      &[]bool{true}[0],  // true pointer  
-		Groups:               []IDName{},
-		Umask:                "",
-		Capabilities:         nil, // Windows doesn't use Linux capabilities
-		SeccompProfileSHA256: "",
-	}
-
-	// Test policy enforcement
-	_, _, _, err = tc.policy.EnforceCreateContainerPolicyV2(constraints.ctx, tc.containerID, tc.argList, tc.envList, tc.workingDir, tc.mounts, tc.user, opts)
-
-	if err != nil {
-		t.Errorf("Policy enforcement failed: %v", err)
-	} else {
-		t.Logf("Policy enforcement succeeded!")
+	if err := quick.Check(f, &quick.Config{MaxCount: 50, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_EnforceEnvironmentVariablePolicy_NotAllMatches: %v", err)
 	}
 }
 
 // Windows-specific container selection function
 func selectWindowsContainerFromContainerList(containers []*securityPolicyWindowsContainer, r *rand.Rand) *securityPolicyWindowsContainer {
-	if len(containers) == 0 {
-		panic("selectWindowsContainerFromContainerList: no containers available to select from")
-	}
 	return containers[r.Intn(len(containers))]
 }
 
@@ -177,10 +157,10 @@ func setupRegoCreateContainerTestWindows(gc *generatedWindowsConstraints, testCo
 	}
 
 	// Debug: print the OS type being used
-	fmt.Printf("OS type being used: %s\n", testOSType)
+	//fmt.Printf("OS type being used: %s\n", testOSType)
 
 	// Debug: print the generated Rego policy
-	fmt.Printf("Generated Rego policy:\n%s\n", securityPolicy.marshalWindowsRego())
+	//fmt.Printf("Generated Rego policy:\n%s\n", securityPolicy.marshalWindowsRego())
 
 	containerID, err := mountImageForWindowsContainer(policy, testContainer)
 	if err != nil {
@@ -235,7 +215,7 @@ func mountImageForWindowsContainer(policy *regoEnforcer, container *securityPoli
 		return "", fmt.Errorf("error mounting CIMFS: %w", err)
 	}
 
-	fmt.Printf("CIMFS mounted successfully for container %s with layers %v\n", containerID, layerHashes)
+	//fmt.Printf("CIMFS mounted successfully for container %s with layers %v\n", containerID, layerHashes)
 
 	return containerID, nil
 }

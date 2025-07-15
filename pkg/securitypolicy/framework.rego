@@ -508,6 +508,8 @@ get_capabilities(container, privileged) := capabilities {
     capabilities := default_unprivileged_capabilities
 }
 
+default create_container := {"allowed": false}
+
 create_container := {"metadata": [updateMatches, addStarted],
                      "env_list": env_list,
                      "caps_list": caps_list,
