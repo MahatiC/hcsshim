@@ -323,11 +323,11 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			// during container creation, hence skip it here
 			containerCommandLine := escapeArgs(c.spec.Process.Args)
 			if processParams.CommandLine != containerCommandLine {
-				opts := &securitypolicy.ExecOptions{
-					User: &securitypolicy.IDName{
-						Name: processParams.User,
-					},
+
+				user := securitypolicy.IDName{
+					Name: processParams.User,
 				}
+
 				log.G(req.ctx).Tracef("Enforcing policy on exec in container")
 				_, _, _, err = b.hostState.securityPolicyEnforcer.
 					EnforceExecInContainerPolicyV2(
@@ -336,7 +336,8 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 						commandLine,
 						processParamEnvToOCIEnv(processParams.Environment),
 						processParams.WorkingDirectory,
-						opts,
+						user,
+						nil,
 					)
 				if err != nil {
 					return errors.Wrapf(err, "exec in container denied due to policy")

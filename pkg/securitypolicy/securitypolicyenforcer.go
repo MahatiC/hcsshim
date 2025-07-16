@@ -21,7 +21,6 @@ type createEnforcerFunc func(base64EncodedPolicy string, criMounts, criPrivilege
 type EnvList []string
 
 type ExecOptions struct {
-	User            *IDName                // for linux, optional: nil means "not set". for windows, only name is set
 	Groups          []IDName               // optional: empty slice or nil
 	Umask           string                 // optional: "" means unspecified
 	Capabilities    *oci.LinuxCapabilities // optional: nil means "none"
@@ -114,6 +113,7 @@ type SecurityPolicyEnforcer interface {
 		argList []string,
 		envList []string,
 		workingDir string,
+		user IDName,
 		opts *ExecOptions,
 	) (EnvList, *oci.LinuxCapabilities, bool, error)
 	EnforceExecExternalProcessPolicy(ctx context.Context, argList []string, envList []string, workingDir string) (EnvList, bool, error)
@@ -586,6 +586,7 @@ func (*StandardSecurityPolicyEnforcer) EnforceExecInContainerPolicyV2(
 	argList []string,
 	envList []string,
 	workingDir string,
+	user IDName,
 	opts *ExecOptions,
 ) (EnvList, *oci.LinuxCapabilities, bool, error) {
 	return envList, opts.Capabilities, true, nil
@@ -1003,6 +1004,7 @@ func (OpenDoorSecurityPolicyEnforcer) EnforceExecInContainerPolicyV2(
 	argList []string,
 	envList []string,
 	workingDir string,
+	user IDName,
 	opts *ExecOptions,
 ) (EnvList, *oci.LinuxCapabilities, bool, error) {
 	return envList, opts.Capabilities, true, nil
@@ -1121,6 +1123,7 @@ func (ClosedDoorSecurityPolicyEnforcer) EnforceExecInContainerPolicyV2(
 	argList []string,
 	envList []string,
 	workingDir string,
+	user IDName,
 	opts *ExecOptions,
 ) (EnvList, *oci.LinuxCapabilities, bool, error) {
 	return nil, nil, false, errors.New("starting additional processes in a container is denied by policy")

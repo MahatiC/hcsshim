@@ -902,13 +902,12 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicy(
 	stdioAccessAllowed bool,
 	err error) {
 	opts := &ExecOptions{
-		User:            &user,
 		Groups:          groups,
 		Umask:           umask,
 		Capabilities:    capabilities,
 		NoNewPrivileges: &noNewPrivileges,
 	}
-	return policy.EnforceExecInContainerPolicyV2(ctx, containerID, argList, envList, workingDir, opts)
+	return policy.EnforceExecInContainerPolicyV2(ctx, containerID, argList, envList, workingDir, user, opts)
 }
 
 func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
@@ -917,6 +916,7 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
 	argList []string,
 	envList []string,
 	workingDir string,
+	user IDName,
 	opts *ExecOptions,
 ) (envToKeep EnvList,
 	capsToKeep *oci.LinuxCapabilities,
@@ -937,7 +937,7 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
 			"envList":         envList,
 			"workingDir":      workingDir,
 			"noNewPrivileges": opts.NoNewPrivileges,
-			"user":            opts.User.toInput(),
+			"user":            user.toInput(),
 			"groups":          groupsToInputs(opts.Groups),
 			"umask":           opts.Umask,
 			"capabilities":    mapifyCapabilities(opts.Capabilities),
@@ -948,7 +948,7 @@ func (policy *regoEnforcer) EnforceExecInContainerPolicyV2(
 			"argList":     argList,
 			"envList":     envList,
 			"workingDir":  workingDir,
-			"user":        opts.User.Name,
+			"user":        user.Name,
 		}
 	default:
 		return nil, nil, false, errors.Errorf("unsupported OS value in options: %q", policy.osType)

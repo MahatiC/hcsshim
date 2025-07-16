@@ -957,7 +957,7 @@ func (*SecurityPolicy) Generate(r *rand.Rand, _ int) reflect.Value {
 
 func (*generatedConstraints) Generate(r *rand.Rand, _ int) reflect.Value {
 	//c := generateConstraints(r, maxContainersInGeneratedConstraints)
-	c := generateConstraints(r, 5)
+	c := generateConstraints(r, maxContainersInGeneratedConstraints)
 	return reflect.ValueOf(c)
 }
 
@@ -1007,7 +1007,7 @@ func generateConstraints(r *rand.Rand, maxContainers int32) *generatedConstraint
 	} else if testOSType == "linux" {
 		// Linux containers
 		for i := 0; i < numContainers; i++ {
-			containers = append(containers, generateConstraintsContainer(r, 1, 5))
+			containers = append(containers, generateConstraintsContainer(r, 1, maxLayersInGeneratedContainer))
 		}
 	}
 
@@ -1667,7 +1667,7 @@ func generateWindowsConstraints(r *rand.Rand, maxContainers int32) *generatedWin
 
 	numContainers := (int)(atLeastOneAtMost(r, maxContainers))
 	for i := 0; i < numContainers; i++ {
-		containers = append(containers, generateConstraintsWindowsContainer(r, 1, 5))
+		containers = append(containers, generateConstraintsWindowsContainer(r, 1, maxLayersInGeneratedContainer))
 	}
 
 	return &generatedWindowsConstraints{
@@ -1687,7 +1687,7 @@ func generateWindowsConstraints(r *rand.Rand, maxContainers int32) *generatedWin
 }
 
 func (*generatedWindowsConstraints) Generate(r *rand.Rand, _ int) reflect.Value {
-	c := generateWindowsConstraints(r, 5)
+	c := generateWindowsConstraints(r, maxContainersInGeneratedConstraints)
 	return reflect.ValueOf(c)
 }
 
