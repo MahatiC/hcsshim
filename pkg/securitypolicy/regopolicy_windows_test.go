@@ -162,6 +162,162 @@ func Test_Rego_ExecInContainerPolicy_Windows(t *testing.T) {
 	}
 }
 
+func Test_Rego_ExecInContainerPolicy_No_Matches_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		container := selectContainerFromRunningContainers(tc.runningContainers, testRand)
+
+		process := generateWindowsContainerExecProcess(testRand)
+		envList := buildEnvironmentVariablesFromEnvRules(container.windowsContainer.EnvRules, testRand)
+		user := IDName{Name: container.windowsContainer.User}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, container.containerID, process.Command, envList, container.windowsContainer.WorkingDir, user, nil)
+		if err == nil {
+			t.Error("Test unexpectedly passed")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_ExecInContainerPolicy_No_Matches: %v", err)
+	}
+}
+
+func Test_Rego_ExecInContainerPolicy_Command_No_Match_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		container := selectContainerFromRunningContainers(tc.runningContainers, testRand)
+		envList := buildEnvironmentVariablesFromEnvRules(container.windowsContainer.EnvRules, testRand)
+		user := IDName{Name: container.windowsContainer.User}
+
+		command := generateCommand(testRand)
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, container.containerID, command, envList, container.windowsContainer.WorkingDir, user, nil)
+
+		// not getting an error means something is broken
+		if err == nil {
+			t.Error("Unexpected success when enforcing policy")
+			return false
+		}
+
+		return assertDecisionJSONContains(t, err, "invalid command")
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_ExecInContainerPolicy_Command_No_Match: %v", err)
+	}
+}
+
+func Test_Rego_ExecInContainerPolicy_Some_Env_Not_Allowed_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		container := selectContainerFromRunningContainers(tc.runningContainers, testRand)
+		process := selectWindowsExecProcess(container.windowsContainer.ExecProcesses, testRand)
+		envList := generateEnvironmentVariables(testRand)
+		user := IDName{Name: container.windowsContainer.User}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, container.containerID, process.Command, envList, container.windowsContainer.WorkingDir, user, nil)
+
+		// not getting an error means something is broken
+		if err == nil {
+			t.Error("Unexpected success when enforcing policy")
+			return false
+		}
+
+		return assertDecisionJSONContains(t, err, "invalid env list")
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_ExecInContainerPolicy_Some_Env_Not_Allowed: %v", err)
+	}
+}
+
+func Test_Rego_ExecInContainerPolicy_WorkingDir_No_Match_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		container := selectContainerFromRunningContainers(tc.runningContainers, testRand)
+		process := selectWindowsExecProcess(container.windowsContainer.ExecProcesses, testRand)
+		envList := buildEnvironmentVariablesFromEnvRules(container.windowsContainer.EnvRules, testRand)
+		workingDir := generateWorkingDir(testRand)
+		user := IDName{Name: container.windowsContainer.User}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, container.containerID, process.Command, envList, workingDir, user, nil)
+
+		// not getting an error means something is broken
+		if err == nil {
+			t.Error("Unexpected success when enforcing policy")
+			return false
+		}
+
+		return assertDecisionJSONContains(t, err, "invalid working directory")
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_ExecInContainerPolicy_WorkingDir_No_Match: %v", err)
+	}
+}
+
+func Test_Rego_ExecInContainerPolicy_DropEnvs_Windows(t *testing.T) {
+	testFunc := func(gc *generatedWindowsConstraints) bool {
+		gc.allowEnvironmentVariableDropping = true
+		tc, err := setupRegoRunningWindowsContainerTest(gc)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		container := selectContainerFromRunningContainers(tc.runningContainers, testRand)
+
+		process := selectWindowsExecProcess(container.windowsContainer.ExecProcesses, testRand)
+		expected := buildEnvironmentVariablesFromEnvRules(container.windowsContainer.EnvRules, testRand)
+
+		extraRules := generateEnvironmentVariableRules(testRand)
+		extraEnvs := buildEnvironmentVariablesFromEnvRules(extraRules, testRand)
+
+		envList := append(expected, extraEnvs...)
+		user := IDName{Name: container.windowsContainer.User}
+
+		actual, _, _, err := tc.policy.EnforceExecInContainerPolicyV2(gc.ctx, container.containerID, process.Command, envList, container.windowsContainer.WorkingDir, user, nil)
+
+		if err != nil {
+			t.Errorf("expected exec in container process to be allowed. It wasn't: %v", err)
+			return false
+		}
+
+		if !areStringArraysEqual(actual, expected) {
+			t.Errorf("environment variables were not dropped correctly.")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(testFunc, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_ExecInContainerPolicy_DropEnvs: %v", err)
+	}
+}
+
 func Test_Rego_EnforceCommandPolicy_NoMatches_Windows(t *testing.T) {
 	f := func(p *generatedWindowsConstraints) bool {
 		tc, err := setupSimpleRegoCreateContainerTestWindows(p)
