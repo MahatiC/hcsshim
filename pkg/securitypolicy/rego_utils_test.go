@@ -1717,3 +1717,91 @@ func assertDecisionJSONDoesNotContain(t *testing.T, err error, expectedValues ..
 
 	return true
 }
+
+// Windows-specific container selection function
+func selectWindowsContainerFromContainerList(containers []*securityPolicyWindowsContainer, r *rand.Rand) *securityPolicyWindowsContainer {
+	return containers[r.Intn(len(containers))]
+}
+
+// Windows-specific simple setup function
+func setupSimpleRegoCreateContainerTestWindows(gc *generatedWindowsConstraints) (tc *regoContainerTestConfig, err error) {
+	c := selectWindowsContainerFromContainerList(gc.containers, testRand)
+	return setupRegoCreateContainerTestWindows(gc, c, false)
+}
+
+// Windows-specific container test setup
+func setupRegoCreateContainerTestWindows(gc *generatedWindowsConstraints, testContainer *securityPolicyWindowsContainer, privilegedError bool) (tc *regoContainerTestConfig, err error) {
+	securityPolicy := gc.toPolicy()
+	defaultMounts := generateMounts(testRand)
+	privilegedMounts := generateMounts(testRand)
+
+	policy, err := newRegoPolicy(securityPolicy.marshalWindowsRego(),
+		toOCIMounts(defaultMounts),
+		toOCIMounts(privilegedMounts),
+		testOSType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Debug: print the OS type being used
+	//fmt.Printf("OS type being used: %s\n", testOSType)
+
+	// Debug: print the generated Rego policy
+	//fmt.Printf("Generated Rego policy:\n%s\n", securityPolicy.marshalWindowsRego())
+
+	containerID, err := mountImageForWindowsContainer(policy, testContainer)
+	if err != nil {
+		return nil, err
+	}
+
+	envList := buildEnvironmentVariablesFromEnvRules(testContainer.EnvRules, testRand)
+	sandboxID := testDataGenerator.uniqueSandboxID()
+
+	// Handle Windows user configuration
+	user := IDName{}
+	if testContainer.User != "" {
+		user = IDName{Name: testContainer.User}
+	} else {
+		user = IDName{Name: generateIDNameName(testRand)}
+	}
+
+	return &regoContainerTestConfig{
+		envList:         copyStrings(envList),
+		argList:         copyStrings(testContainer.Command),
+		workingDir:      testContainer.WorkingDir,
+		containerID:     containerID,
+		sandboxID:       sandboxID,
+		mounts:          []oci.Mount{},
+		noNewPrivileges: false,
+		user:            user,
+		groups:          []IDName{},
+		umask:           "",
+		capabilities:    nil,
+		seccomp:         "",
+		policy:          policy,
+		ctx:             gc.ctx,
+	}, nil
+}
+
+func mountImageForWindowsContainer(policy *regoEnforcer, container *securityPolicyWindowsContainer) (string, error) {
+	ctx := context.Background()
+	containerID := testDataGenerator.uniqueContainerID()
+
+	// For Windows containers, we need to mount using CIMFS (container image mount)
+	// The layerHashes_ok function expects hashes in reverse order compared to how they're stored
+	layerHashes := make([]string, len(container.Layers))
+	for i, layer := range container.Layers {
+		// Reverse the order: last layer becomes first in the input
+		layerHashes[len(container.Layers)-1-i] = layer
+	}
+
+	// Mount the CIMFS for the Windows container
+	err := policy.EnforceVerifiedCIMsPolicy(ctx, containerID, layerHashes)
+	if err != nil {
+		return "", fmt.Errorf("error mounting CIMFS: %w", err)
+	}
+
+	//fmt.Printf("CIMFS mounted successfully for container %s with layers %v\n", containerID, layerHashes)
+
+	return containerID, nil
+}
