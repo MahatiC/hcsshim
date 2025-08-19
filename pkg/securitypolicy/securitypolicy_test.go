@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/hcsshim/internal/guestpath"
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -45,6 +46,7 @@ const (
 	maxGeneratedGroupNames                    = 4
 	maxGeneratedCapabilities                  = 12
 	maxGeneratedCapabilitesLength             = 24
+	maxWindowsSignalLength                    = 64
 	// additional consts
 	// the standard enforcer tests don't do anything with the encoded policy
 	// string. this const exists to make that explicit
@@ -1119,7 +1121,7 @@ func generateContainerExecProcess(r *rand.Rand) containerExecProcess {
 
 func generateWindowsContainerExecProcess(r *rand.Rand) windowsContainerExecProcess {
 	return windowsContainerExecProcess{
-		Command: generateCommand(r),
+		Command: generateWindowsUser(r),
 		Signals: generateWindowsSignals(r),
 	}
 }
@@ -1147,12 +1149,14 @@ func generateCommand(r *rand.Rand) []string {
 	return args
 }
 
-func generateWindowsSignals(r *rand.Rand) []string {
-	var args []string
+func generateWindowsSignals(r *rand.Rand) []guestrequest.SignalValueWCOW {
+	var args []guestrequest.SignalValueWCOW
 
 	numArgs := atLeastOneAtMost(r, maxGeneratedCommandArgs)
 	for i := 0; i < int(numArgs); i++ {
-		args = append(args, randVariableString(r, maxGeneratedCommandLength))
+		var str string = randVariableString(r, maxGeneratedCommandLength)
+		var sig guestrequest.SignalValueWCOW = guestrequest.SignalValueWCOW(str)
+		args = append(args, sig)
 	}
 
 	return args
@@ -1177,24 +1181,9 @@ func generateExecProcesses(r *rand.Rand) []containerExecProcess {
 	var processes []containerExecProcess
 
 	numProcesses := atLeastOneAtMost(r, maxGeneratedExecProcesses)
-	if testOSType == "windows" {
-		// Windows containers - generate compatible exec processes
-		for i := 0; i < int(numProcesses); i++ {
-			// Convert Windows exec process to containerExecProcess
-			winProcess := generateWindowsContainerExecProcess(r)
-			process := containerExecProcess{
-				Command: winProcess.Command,
-				// Note: Windows signals are strings, but containerExecProcess expects syscall.Signal
-				// This conversion may need adjustment based on your requirements
-				Signals: []syscall.Signal{}, // Placeholder - you may need to convert string signals to syscall.Signal
-			}
-			processes = append(processes, process)
-		}
-	} else if testOSType == "linux" {
-		// Linux containers
-		for i := 0; i < int(numProcesses); i++ {
-			processes = append(processes, generateContainerExecProcess(r))
-		}
+
+	for i := 0; i < int(numProcesses); i++ {
+		processes = append(processes, generateContainerExecProcess(r))
 	}
 
 	return processes
@@ -1400,6 +1389,23 @@ func generateListOfSignals(r *rand.Rand, atLeast int32, atMost int32) []syscall.
 	var signals []syscall.Signal
 	for k := range signalSet {
 		signals = append(signals, k)
+	}
+
+	return signals
+}
+
+func generateListOfWindowsSignals(r *rand.Rand, atLeast int32, atMost int32) []guestrequest.SignalValueWCOW {
+	numSignals := int(atLeastNAtMostM(r, atLeast, atMost))
+	signalSet := make(map[string]struct{})
+
+	for i := 0; i < numSignals; i++ {
+		signal := randVariableString(r, maxWindowsSignalLength)
+		signalSet[signal] = struct{}{}
+	}
+
+	var signals []guestrequest.SignalValueWCOW
+	for k := range signalSet {
+		signals = append(signals, guestrequest.SignalValueWCOW(k))
 	}
 
 	return signals

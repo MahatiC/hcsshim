@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"syscall"
+
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 )
 
 type marshalFunc func(
@@ -432,8 +434,12 @@ func writeMounts(builder *strings.Builder, mounts []mountInternal, indent string
 }
 
 // Windows-specific marshal functions
-func writeWindowsSignals(builder *strings.Builder, signals []string, indent string) {
-	array := (stringArray(signals)).marshalRego()
+func writeWindowsSignals(builder *strings.Builder, signals []guestrequest.SignalValueWCOW, indent string) {
+	signalsArray := make([]string, len(signals))
+	for i, s := range signals {
+		signalsArray[i] = string(s)
+	}
+	array := (stringArray(signalsArray)).marshalRego()
 	writeLine(builder, `%s"signals": %s,`, indent, array)
 }
 
@@ -442,8 +448,13 @@ func writeWindowsUser(builder *strings.Builder, user string, indent string) {
 }
 
 func (p windowsContainerExecProcess) marshalRego() string {
-	command := stringArray(p.Command).marshalRego()
-	signals := stringArray(p.Signals).marshalRego()
+	commandLine := []string{p.Command}
+	command := stringArray(commandLine).marshalRego()
+	signalsArray := make([]string, len(p.Signals))
+	for i, s := range p.Signals {
+		signalsArray[i] = string(s)
+	}
+	signals := stringArray(signalsArray).marshalRego()
 	return fmt.Sprintf(`{"command": %s, "signals": %s}`, command, signals)
 }
 

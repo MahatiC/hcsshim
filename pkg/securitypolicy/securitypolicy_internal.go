@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"syscall"
+
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 )
 
 // Internal version of SecurityPolicy
@@ -190,7 +192,7 @@ type securityPolicyWindowsContainer struct {
 	ExecProcesses []windowsContainerExecProcess `json:"exec_processes"`
 	// A list of signals that are allowed to be sent to the container's init
 	// process
-	Signals []string `json:"signals,omitempty"`
+	Signals []guestrequest.SignalValueWCOW `json:"signals,omitempty"`
 	// Whether to allow the capture of init process standard out and standard error
 	AllowStdioAccess bool `json:"allow_stdio_access"`
 	// The user that the container will run as
@@ -204,9 +206,9 @@ type containerExecProcess struct {
 }
 
 type windowsContainerExecProcess struct {
-	Command []string `json:"command"`
+	Command string `json:"command"`
 	// A list of signals that are allowed to be sent to this process
-	Signals []string `json:"signals,omitempty"`
+	Signals []guestrequest.SignalValueWCOW `json:"signals,omitempty"`
 }
 
 type externalProcess struct {

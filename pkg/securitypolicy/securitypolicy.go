@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/Microsoft/hcsshim/internal/guestpath"
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 )
@@ -189,8 +190,8 @@ type ExecProcessConfig struct {
 }
 
 type WindowsExecProcessConfig struct {
-	Command []string `json:"command" toml:"command"`
-	Signals []string `json:"signals" toml:"signals"`
+	Command string                         `json:"command" toml:"command"`
+	Signals []guestrequest.SignalValueWCOW `json:"signals" toml:"signals"`
 }
 
 // CapabilitiesConfig contains the toml or JSON config for capabilies security
@@ -300,14 +301,14 @@ type Container struct {
 }
 
 type WindowsContainer struct {
-	Command          CommandArgs                `json:"command"`
-	EnvRules         EnvRules                   `json:"env_rules"`
-	Layers           Layers                     `json:"layers"`
-	WorkingDir       string                     `json:"working_dir"`
-	ExecProcesses    []WindowsExecProcessConfig `json:"-"`
-	Signals          []string                   `json:"-"`
-	AllowStdioAccess bool                       `json:"-"`
-	User             string                     `json:"-"`
+	Command          CommandArgs                    `json:"command"`
+	EnvRules         EnvRules                       `json:"env_rules"`
+	Layers           Layers                         `json:"layers"`
+	WorkingDir       string                         `json:"working_dir"`
+	ExecProcesses    []WindowsExecProcessConfig     `json:"-"`
+	Signals          []guestrequest.SignalValueWCOW `json:"-"`
+	AllowStdioAccess bool                           `json:"-"`
+	User             string                         `json:"-"`
 }
 
 // StringArrayMap wraps an array of strings as a string map.

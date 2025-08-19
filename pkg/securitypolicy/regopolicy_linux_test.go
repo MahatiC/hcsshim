@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,134 +15,10 @@ import (
 	"testing/quick"
 
 	rpi "github.com/Microsoft/hcsshim/internal/regopolicyinterpreter"
-	"github.com/open-policy-agent/opa/rego"
 	oci "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 const testOSType = "linux"
-
-func Test_RegoTemplates(t *testing.T) {
-	query := rego.New(
-		rego.Query("data.api"),
-		rego.Module("api.rego", APICode))
-
-	ctx := context.Background()
-	resultSet, err := query.Eval(ctx)
-	if err != nil {
-		t.Fatalf("unable to query API enforcement points: %s", err)
-	}
-
-	apiRules := resultSet[0].Expressions[0].Value.(map[string]interface{})
-	enforcementPoints := apiRules["enforcement_points"].(map[string]interface{})
-
-	policyCode := strings.Replace(policyRegoTemplate, "@@OBJECTS@@", "", 1)
-	policyCode = strings.Replace(policyCode, "@@API_VERSION@@", apiVersion, 1)
-	policyCode = strings.Replace(policyCode, "@@FRAMEWORK_VERSION@@", frameworkVersion, 1)
-
-	err = verifyPolicyRules(apiVersion, enforcementPoints, policyCode)
-	if err != nil {
-		t.Errorf("Policy Rego Template is invalid: %s", err)
-	}
-
-	err = verifyPolicyRules(apiVersion, enforcementPoints, openDoorRego)
-	if err != nil {
-		t.Errorf("Open Door Rego Template is invalid: %s", err)
-	}
-}
-
-func Test_MarshalRego_Policy(t *testing.T) {
-	f := func(p *generatedConstraints) bool {
-		p.externalProcesses = generateExternalProcesses(testRand)
-		for _, process := range p.externalProcesses {
-			// arbitrary environment variable rules for external
-			// processes are not currently handled by the config.
-			process.envRules = []EnvRuleConfig{{
-				Strategy: "string",
-				Rule:     "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-				Required: true,
-			}}
-		}
-
-		p.fragments = generateFragments(testRand, 1)
-
-		securityPolicy := p.toPolicy()
-		defaultMounts := toOCIMounts(generateMounts(testRand))
-		privilegedMounts := toOCIMounts(generateMounts(testRand))
-
-		expected := securityPolicy.marshalRego()
-
-		containers := make([]*Container, len(p.containers))
-		for i, container := range p.containers {
-			containers[i] = container.toContainer()
-		}
-
-		externalProcesses := make([]ExternalProcessConfig, len(p.externalProcesses))
-		for i, process := range p.externalProcesses {
-			externalProcesses[i] = process.toConfig()
-		}
-
-		fragments := make([]FragmentConfig, len(p.fragments))
-		for i, fragment := range p.fragments {
-			fragments[i] = fragment.toConfig()
-		}
-
-		actual, err := MarshalPolicy(
-			"rego",
-			false,
-			containers,
-			externalProcesses,
-			fragments,
-			p.allowGetProperties,
-			p.allowDumpStacks,
-			p.allowRuntimeLogging,
-			p.allowEnvironmentVariableDropping,
-			p.allowUnencryptedScratch,
-			p.allowCapabilityDropping,
-		)
-		if err != nil {
-			t.Error(err)
-			return false
-		}
-
-		if actual != expected {
-			start := -1
-			end := -1
-			for i := 0; i < len(actual) && i < len(expected); i++ {
-				if actual[i] != expected[i] {
-					if start == -1 {
-						start = i
-					} else if i-start >= maxDiffLength {
-						end = i
-						break
-					}
-				} else if start != -1 {
-					end = i
-					break
-				}
-			}
-			start = start - 512
-			if start < 0 {
-				start = 0
-			}
-			t.Errorf(`MarshalPolicy does not create the expected Rego policy [%d-%d]: "%s" != "%s"`, start, end, actual[start:end], expected[start:end])
-			return false
-		}
-
-		os.WriteFile("linux-expected-output.txt", []byte(expected), 0644)
-		_, err = newRegoPolicy(expected, defaultMounts, privilegedMounts, testOSType)
-
-		if err != nil {
-			t.Errorf("unable to convert policy to rego: %v", err)
-			return false
-		}
-
-		return true
-	}
-
-	if err := quick.Check(f, &quick.Config{MaxCount: 4, Rand: testRand}); err != nil {
-		t.Errorf("Test_MarshalRego_Policy failed: %v", err)
-	}
-}
 
 func Test_MarshalRego_Fragment(t *testing.T) {
 	f := func(p *generatedConstraints) bool {
