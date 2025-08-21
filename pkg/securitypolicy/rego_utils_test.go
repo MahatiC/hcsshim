@@ -763,6 +763,26 @@ func setupGetPropertiesTest(gc *generatedConstraints, allowPropertiesAccess bool
 	}, nil
 }
 
+func setupGetPropertiesTestWindows(gc *generatedWindowsConstraints, allowPropertiesAccess bool) (tc *regoGetPropertiesTestConfig, err error) {
+	gc.allowGetProperties = allowPropertiesAccess
+
+	securityPolicy := gc.toPolicy()
+	defaultMounts := generateMounts(testRand)
+	privilegedMounts := generateMounts(testRand)
+
+	policy, err := newRegoPolicy(securityPolicy.marshalWindowsRego(),
+		toOCIMounts(defaultMounts),
+		toOCIMounts(privilegedMounts),
+		testOSType)
+	if err != nil {
+		return nil, err
+	}
+
+	return &regoGetPropertiesTestConfig{
+		policy: policy,
+	}, nil
+}
+
 type regoGetPropertiesTestConfig struct {
 	policy *regoEnforcer
 }
@@ -775,6 +795,26 @@ func setupDumpStacksTest(constraints *generatedConstraints, allowDumpStacks bool
 	privilegedMounts := generateMounts(testRand)
 
 	policy, err := newRegoPolicy(securityPolicy.marshalRego(),
+		toOCIMounts(defaultMounts),
+		toOCIMounts(privilegedMounts),
+		testOSType)
+	if err != nil {
+		return nil, err
+	}
+
+	return &regoGetPropertiesTestConfig{
+		policy: policy,
+	}, nil
+}
+
+func setupDumpStacksTestWindows(constraints *generatedWindowsConstraints, allowDumpStacks bool) (tc *regoGetPropertiesTestConfig, err error) {
+	constraints.allowDumpStacks = allowDumpStacks
+
+	securityPolicy := constraints.toPolicy()
+	defaultMounts := generateMounts(testRand)
+	privilegedMounts := generateMounts(testRand)
+
+	policy, err := newRegoPolicy(securityPolicy.marshalWindowsRego(),
 		toOCIMounts(defaultMounts),
 		toOCIMounts(privilegedMounts),
 		testOSType)
@@ -830,6 +870,7 @@ type regoFragmentContainer struct {
 	seccomp      string
 }
 
+// Fragment tests set up for Linux
 func setupSimpleRegoFragmentTestConfig(gc *generatedConstraints) (*regoFragmentTestConfig, error) {
 	return setupRegoFragmentTestConfig(gc, 1, []string{"containers"}, []string{}, false, false, false, false)
 }
@@ -856,18 +897,6 @@ func setupRegoFragmentTwoFeedTestConfig(gc *generatedConstraints, sameIssuer boo
 
 func setupRegoFragmentSVNMismatchTestConfig(gc *generatedConstraints) (*regoFragmentTestConfig, error) {
 	return setupRegoFragmentTestConfig(gc, 2, []string{"containers"}, []string{}, false, false, false, true)
-}
-
-func compareSVNs(lhs string, rhs string) int {
-	lhs_int, err := strconv.Atoi(lhs)
-	if err == nil {
-		rhs_int, err := strconv.Atoi(rhs)
-		if err == nil {
-			return lhs_int - rhs_int
-		}
-	}
-
-	panic("unable to compare SVNs")
 }
 
 func setupRegoFragmentTestConfig(gc *generatedConstraints, numFragments int, includes []string, excludes []string, svnError bool, sameIssuer bool, sameFeed bool, svnMismatch bool) (tc *regoFragmentTestConfig, err error) {
@@ -976,6 +1005,18 @@ func setupRegoFragmentTestConfig(gc *generatedConstraints, numFragments int, inc
 		plan9Mounts:       plan9Mounts,
 		policy:            policy,
 	}, nil
+}
+
+func compareSVNs(lhs string, rhs string) int {
+	lhs_int, err := strconv.Atoi(lhs)
+	if err == nil {
+		rhs_int, err := strconv.Atoi(rhs)
+		if err == nil {
+			return lhs_int - rhs_int
+		}
+	}
+
+	panic("unable to compare SVNs")
 }
 
 type regoDropEnvsTestConfig struct {

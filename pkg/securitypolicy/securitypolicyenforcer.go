@@ -44,7 +44,7 @@ type SignalContainerOptions struct {
 	WindowsSignal guestrequest.SignalValueWCOW
 
 	LinuxStartupArgs []string
-	WindowsCommand   string
+	WindowsCommand   []string
 }
 
 const (

@@ -1032,7 +1032,7 @@ func (policy *regoEnforcer) EnforceSignalContainerProcessPolicyV2(ctx context.Co
 			"containerID":   containerID,
 			"signal":        opts.WindowsSignal,
 			"isInitProcess": opts.IsInitProcess,
-			"cmdLine":       opts.WindowsCommand,
+			"argList":       opts.WindowsCommand,
 		}
 	default:
 		return errors.Errorf("unsupported OS value in options: %q", policy.osType)

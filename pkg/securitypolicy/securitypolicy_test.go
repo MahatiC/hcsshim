@@ -1411,6 +1411,9 @@ func generateListOfWindowsSignals(r *rand.Rand, atLeast int32, atMost int32) []g
 	return signals
 }
 
+func generateWindowsSignal(r *rand.Rand) guestrequest.SignalValueWCOW {
+	return guestrequest.SignalValueWCOW(randVariableString(r, maxWindowsSignalLength))
+}
 func generateSignal(r *rand.Rand) syscall.Signal {
 	return syscall.Signal(atLeastOneAtMost(r, maxSignalNumber))
 }

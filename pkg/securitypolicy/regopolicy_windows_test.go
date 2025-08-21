@@ -13,6 +13,7 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/Microsoft/hcsshim/internal/protocol/guestrequest"
 	oci "github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -325,6 +326,7 @@ func Test_Rego_EnforceCreateContainer_Same_Container_Twice_Windows(t *testing.T)
 func Test_Rego_ExecInContainerPolicy_Windows(t *testing.T) {
 	f := func(p *generatedWindowsConstraints) bool {
 		t.Logf("Testing with %d containers", len(p.containers))
+		t.Logf("Testing with containers: %v", p.containers)
 		tc, err := setupRegoRunningWindowsContainerTest(p)
 		if err != nil {
 			t.Error(err)
@@ -1018,4 +1020,324 @@ func Test_Rego_ShutdownContainerPolicy_Not_Running_Container_Windows(t *testing.
 	}
 }
 
-// -- Trace from here --//
+func Test_Rego_SignalContainerProcessPolicy_ExecProcess_Allowed_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		t.Logf("Testing with %d containers", len(p.containers))
+		containerUnderTest := generateConstraintsWindowsContainer(testRand, 1, maxLayersInGeneratedContainer)
+
+		ep := generateWindowsExecProcesses(testRand)
+		ep[0].Signals = generateListOfWindowsSignals(testRand, 1, 4)
+		containerUnderTest.ExecProcesses = ep
+		processUnderTest := ep[0]
+
+		p.containers = append(p.containers, containerUnderTest)
+
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		containerID, err := idForRunningWindowsContainer(containerUnderTest, tc.runningContainers)
+		if err != nil {
+			r, err := runWindowsContainer(tc.policy, containerUnderTest)
+			if err != nil {
+				t.Errorf("Unable to setup test running container: %v", err)
+				return false
+			}
+			containerID = r.containerID
+		}
+
+		envList := buildEnvironmentVariablesFromEnvRules(containerUnderTest.EnvRules, testRand)
+		user := IDName{Name: containerUnderTest.User}
+		commandLine := []string{processUnderTest.Command}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, containerID, commandLine, envList, containerUnderTest.WorkingDir, user, nil)
+		if err != nil {
+			t.Errorf("Unable to exec process for test: %v", err)
+			return false
+		}
+
+		signal := selectSignalFromWindowsSignals(testRand, processUnderTest.Signals)
+		opts := &SignalContainerOptions{
+			WindowsSignal:  signal,
+			WindowsCommand: commandLine,
+		}
+
+		err = tc.policy.EnforceSignalContainerProcessPolicyV2(p.ctx, containerID, opts)
+		if err != nil {
+			t.Errorf("Signal init process unexpectedly failed: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 5, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_SignalContainerProcessPolicy_ExecProcess_Allowed: %v", err)
+	}
+}
+
+func Test_Rego_SignalContainerProcessPolicy_ExecProcess_Not_Allowed_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		containerUnderTest := generateConstraintsWindowsContainer(testRand, 1, maxLayersInGeneratedContainer)
+
+		ep := generateWindowsExecProcesses(testRand)
+		ep[0].Signals = make([]guestrequest.SignalValueWCOW, 0)
+		containerUnderTest.ExecProcesses = ep
+		processUnderTest := ep[0]
+
+		p.containers = append(p.containers, containerUnderTest)
+
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		containerID, err := idForRunningWindowsContainer(containerUnderTest, tc.runningContainers)
+		if err != nil {
+			r, err := runWindowsContainer(tc.policy, containerUnderTest)
+			if err != nil {
+				t.Errorf("Unable to setup test running container: %v", err)
+				return false
+			}
+			containerID = r.containerID
+		}
+
+		envList := buildEnvironmentVariablesFromEnvRules(containerUnderTest.EnvRules, testRand)
+		user := IDName{Name: containerUnderTest.User}
+		commandLine := []string{processUnderTest.Command}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, containerID, commandLine, envList, containerUnderTest.WorkingDir, user, nil)
+		if err != nil {
+			t.Errorf("Unable to exec process for test: %v", err)
+			return false
+		}
+
+		signal := generateWindowsSignal(testRand)
+
+		opts := &SignalContainerOptions{
+			WindowsSignal:  signal,
+			WindowsCommand: commandLine,
+		}
+
+		err = tc.policy.EnforceSignalContainerProcessPolicyV2(p.ctx, containerID, opts)
+		if err == nil {
+			t.Errorf("Signal init process unexpectedly succeeded: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_SignalContainerProcessPolicy_ExecProcess_Not_Allowed: %v", err)
+	}
+}
+
+func Test_Rego_SignalContainerProcessPolicy_ExecProcess_Bad_Command(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		containerUnderTest := generateConstraintsWindowsContainer(testRand, 1, maxLayersInGeneratedContainer)
+
+		ep := generateWindowsExecProcesses(testRand)
+		ep[0].Signals = generateListOfWindowsSignals(testRand, 1, 4)
+		containerUnderTest.ExecProcesses = ep
+		processUnderTest := ep[0]
+
+		p.containers = append(p.containers, containerUnderTest)
+
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		containerID, err := idForRunningWindowsContainer(containerUnderTest, tc.runningContainers)
+		if err != nil {
+			r, err := runWindowsContainer(tc.policy, containerUnderTest)
+			if err != nil {
+				t.Errorf("Unable to setup test running container: %v", err)
+				return false
+			}
+			containerID = r.containerID
+		}
+
+		envList := buildEnvironmentVariablesFromEnvRules(containerUnderTest.EnvRules, testRand)
+		user := IDName{Name: containerUnderTest.User}
+		commandLine := []string{processUnderTest.Command}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, containerID, commandLine, envList, containerUnderTest.WorkingDir, user, nil)
+		if err != nil {
+			t.Errorf("Unable to exec process for test: %v", err)
+			return false
+		}
+
+		signal := selectSignalFromWindowsSignals(testRand, processUnderTest.Signals)
+		badCommand := generateCommand(testRand)
+
+		opts := &SignalContainerOptions{
+			WindowsSignal:  signal,
+			WindowsCommand: badCommand,
+		}
+
+		err = tc.policy.EnforceSignalContainerProcessPolicyV2(p.ctx, containerID, opts)
+		if err == nil {
+			t.Errorf("Signal init process unexpectedly succeeded: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_SignalContainerProcessPolicy_ExecProcess_Bad_Command: %v", err)
+	}
+}
+
+func Test_Rego_SignalContainerProcessPolicy_ExecProcess_Bad_ContainerID(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		containerUnderTest := generateConstraintsWindowsContainer(testRand, 1, maxLayersInGeneratedContainer)
+
+		ep := generateWindowsExecProcesses(testRand)
+		ep[0].Signals = generateListOfWindowsSignals(testRand, 1, 4)
+		containerUnderTest.ExecProcesses = ep
+		processUnderTest := ep[0]
+
+		p.containers = append(p.containers, containerUnderTest)
+
+		tc, err := setupRegoRunningWindowsContainerTest(p)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		containerID, err := idForRunningWindowsContainer(containerUnderTest, tc.runningContainers)
+		if err != nil {
+			r, err := runWindowsContainer(tc.policy, containerUnderTest)
+			if err != nil {
+				t.Errorf("Unable to setup test running container: %v", err)
+				return false
+			}
+			containerID = r.containerID
+		}
+
+		envList := buildEnvironmentVariablesFromEnvRules(containerUnderTest.EnvRules, testRand)
+		user := IDName{Name: containerUnderTest.User}
+		commandLine := []string{processUnderTest.Command}
+
+		_, _, _, err = tc.policy.EnforceExecInContainerPolicyV2(p.ctx, containerID, commandLine, envList, containerUnderTest.WorkingDir, user, nil)
+		if err != nil {
+			t.Errorf("Unable to exec process for test: %v", err)
+			return false
+		}
+
+		signal := selectSignalFromWindowsSignals(testRand, processUnderTest.Signals)
+		badContainerID := generateContainerID(testRand)
+
+		opts := &SignalContainerOptions{
+			WindowsSignal:  signal,
+			WindowsCommand: commandLine,
+		}
+
+		err = tc.policy.EnforceSignalContainerProcessPolicyV2(p.ctx, badContainerID, opts)
+		if err == nil {
+			t.Errorf("Signal init process unexpectedly succeeded: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 25, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_SignalContainerProcessPolicy_ExecProcess_Bad_ContainerID: %v", err)
+	}
+}
+
+func Test_Rego_GetPropertiesPolicy_On(t *testing.T) {
+	f := func(constraints *generatedWindowsConstraints) bool {
+		tc, err := setupGetPropertiesTestWindows(constraints, true)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		err = tc.policy.EnforceGetPropertiesPolicy(constraints.ctx)
+		if err != nil {
+			t.Error("Policy enforcement unexpectedly was denied")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 50}); err != nil {
+		t.Errorf("Test_Rego_GetPropertiesPolicy_On: %v", err)
+	}
+}
+
+func Test_Rego_GetPropertiesPolicy_Off(t *testing.T) {
+	f := func(constraints *generatedWindowsConstraints) bool {
+		tc, err := setupGetPropertiesTestWindows(constraints, false)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		err = tc.policy.EnforceGetPropertiesPolicy(constraints.ctx)
+		if err == nil {
+			t.Error("Policy enforcement unexpectedly was allowed")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 50}); err != nil {
+		t.Errorf("Test_Rego_GetPropertiesPolicy_Off: %v", err)
+	}
+}
+
+func Test_Rego_DumpStacksPolicy_On(t *testing.T) {
+	f := func(constraints *generatedWindowsConstraints) bool {
+		tc, err := setupDumpStacksTestWindows(constraints, true)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		err = tc.policy.EnforceDumpStacksPolicy(constraints.ctx)
+		if err != nil {
+			t.Errorf("Policy enforcement unexpectedly was denied: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 50}); err != nil {
+		t.Errorf("Test_Rego_DumpStacksPolicy_On: %v", err)
+	}
+}
+
+func Test_Rego_DumpStacksPolicy_Off(t *testing.T) {
+	f := func(constraints *generatedWindowsConstraints) bool {
+		tc, err := setupDumpStacksTestWindows(constraints, false)
+		if err != nil {
+			t.Error(err)
+			return false
+		}
+
+		err = tc.policy.EnforceDumpStacksPolicy(constraints.ctx)
+		if err == nil {
+			t.Error("Policy enforcement unexpectedly was allowed")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 50}); err != nil {
+		t.Errorf("Test_Rego_DumpStacksPolicy_Off: %v", err)
+	}
+}
