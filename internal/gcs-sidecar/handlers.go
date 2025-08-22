@@ -4,7 +4,7 @@
 package bridge
 
 import (
-	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -643,8 +643,10 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 			// The block device takes some time to show up. Wait for a few seconds.
 			time.Sleep(2 * time.Second)
 
+			//TODO(Mahati) : test and verify CIM hashes
 			var layerCIMs []*cimfs.BlockCIM
 			layerHashes := make([]string, len(wcowBlockCimMounts.BlockCIMs))
+			layerDigests := make([][]byte, len(wcowBlockCimMounts.BlockCIMs))
 			ctx := req.ctx
 			for i, blockCimDevice := range wcowBlockCimMounts.BlockCIMs {
 				// Get the scsi device path for the blockCim lun
@@ -655,13 +657,20 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 				if err != nil {
 					return fmt.Errorf("err getting scsiDevPath: %w", err)
 				}
+				physicalDevPath := fmt.Sprintf(devPathFormat, devNumber)
 				layerCim := cimfs.BlockCIM{
 					Type:      cimfs.BlockCIMTypeDevice,
-					BlockPath: fmt.Sprintf(devPathFormat, devNumber),
+					BlockPath: physicalDevPath,
 					CimName:   blockCimDevice.CimName,
 				}
+				cimRootDigestBytes, err := cimfs.GetVerificationInfo(physicalDevPath)
+				if err != nil {
+					return fmt.Errorf("failed to get CIM verification info: %w", err)
+				}
+				layerDigests[i] = cimRootDigestBytes
+				layerHashes[i] = base64.URLEncoding.EncodeToString(cimRootDigestBytes)
 				layerCIMs = append(layerCIMs, &layerCim)
-				layerHashes[i] = blockCimDevice.Digest
+				log.G(ctx).Debugf("block CIM layer digest %s, path: %s\n", layerHashes[i], physicalDevPath)
 			}
 
 			// skip the merged cim and verify individual layer hashes
@@ -815,43 +824,4 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 
 	b.forwardRequestToGcs(req)
 	return nil
-}
-
-func modifyMappedVirtualDisk(
-	ctx context.Context,
-	rt guestrequest.RequestType,
-	mvd *guestresource.WCOWMappedVirtualDisk,
-	securityPolicy securitypolicy.SecurityPolicyEnforcer,
-) (err error) {
-	switch rt {
-	case guestrequest.RequestTypeAdd:
-		// TODO: Modify and update this with verified Cims API
-		return securityPolicy.EnforceDeviceMountPolicy(ctx, mvd.ContainerPath, "hash")
-	case guestrequest.RequestTypeRemove:
-		// TODO: Modify and update this with verified Cims API
-		return securityPolicy.EnforceDeviceUnmountPolicy(ctx, mvd.ContainerPath)
-	default:
-		return newInvalidRequestTypeError(rt)
-	}
-}
-
-func modifyCombinedLayers(
-	ctx context.Context,
-	containerID string,
-	rt guestrequest.RequestType,
-	cl guestresource.WCOWCombinedLayers,
-	securityPolicy securitypolicy.SecurityPolicyEnforcer,
-) (err error) {
-	switch rt {
-	case guestrequest.RequestTypeAdd:
-		layerPaths := make([]string, len(cl.Layers))
-		for i, layer := range cl.Layers {
-			layerPaths[i] = layer.Path
-		}
-		return securityPolicy.EnforceOverlayMountPolicy(ctx, containerID, layerPaths, cl.ContainerRootPath)
-	case guestrequest.RequestTypeRemove:
-		return securityPolicy.EnforceOverlayUnmountPolicy(ctx, cl.ContainerRootPath)
-	default:
-		return newInvalidRequestTypeError(rt)
-	}
 }
