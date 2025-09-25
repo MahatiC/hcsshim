@@ -89,10 +89,13 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		if err != nil {
 			return fmt.Errorf("CreateContainer operation is denied by policy: %w", err)
 		}
+		commandLine := len(spec.Process.Args) > 0
 		c := &Container{
-			id:        containerID,
-			spec:      spec,
-			processes: make(map[uint32]*containerProcess),
+			id:              containerID,
+			spec:            spec,
+			processes:       make(map[uint32]*containerProcess),
+			commandLine:     commandLine,
+			commandLineExec: false,
 		}
 		log.G(ctx).Tracef("Adding ContainerID: %v", containerID)
 		if err := b.hostState.AddContainer(req.ctx, containerID, c); err != nil {
@@ -313,11 +316,16 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			return fmt.Errorf("failed to get created container: %w", err)
 		}
 
-		// if this is an exec of Container command line, then it's already enforced
-		// during container creation, hence skip it here
-		containerCommandLine := escapeArgs(c.spec.Process.Args)
-		if processParams.CommandLine != containerCommandLine {
+		c.processesMutex.Lock()
+		isInitExec := c.commandLine && !c.commandLineExec
+		if isInitExec {
+			// if this is an exec of Container command line, then it's already enforced
+			// during container creation, hence skip it here
+			c.commandLineExec = true
 
+		}
+		c.processesMutex.Unlock()
+		if !isInitExec {
 			user := securitypolicy.IDName{
 				Name: processParams.User,
 			}
@@ -336,6 +344,7 @@ func (b *Bridge) executeProcess(req *request) (err error) {
 			if err != nil {
 				return errors.Wrapf(err, "exec in container denied due to policy")
 			}
+
 		}
 		headerID := req.header.ID
 
