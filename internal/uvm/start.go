@@ -214,6 +214,7 @@ func (uvm *UtilityVM) Start(ctx context.Context) (err error) {
 	if uvm.outputListener != nil {
 		switch uvm.operatingSystem {
 		case "windows":
+			log.G(ctx).Debug("Setting output listener in UVM")
 			// Windows specific handling
 			// For windows, the Listener can recieve a connection later, so we
 			// start the output handler in a goroutine with a non-timeout context.

@@ -19,14 +19,17 @@ func (uvm *UtilityVM) StartLogForwarding(ctx context.Context) error {
 
 	wcaps := gcs.GetWCOWCapabilities(uvm.gc.Capabilities())
 	if wcaps != nil && wcaps.IsLogForwardingSupported() {
+		log.G(ctx).Debug("Starting log forwarding service in guest")
 		req := guestrequest.LogForwardServiceRPCRequest{
 			RPCType:  guestrequest.RPCStartLogForwarding,
 			Settings: "",
 		}
 		err := uvm.gc.ModifyServiceSettings(ctx, prot.LogForwardService, req)
 		if err != nil {
+			log.G(ctx).WithError(err).Error("Failed to start log forwarding service")
 			return err
 		}
+		log.G(ctx).Info("Log forwarding service started successfully")
 	} else {
 		log.G(ctx).WithField("os", uvm.operatingSystem).Error("Log forwarding not supported for this OS")
 	}
@@ -61,6 +64,7 @@ func (uvm *UtilityVM) SetLogSources(ctx context.Context) error {
 
 	wcaps := gcs.GetWCOWCapabilities(uvm.gc.Capabilities())
 	if wcaps != nil && wcaps.IsLogForwardingSupported() {
+		log.G(ctx).Debug("Setting log sources in guest")
 		// Make a call to the GCS to set the ETW providers
 		req := guestrequest.LogForwardServiceRPCRequest{
 			RPCType:  guestrequest.RPCModifyServiceSettings,
@@ -68,8 +72,12 @@ func (uvm *UtilityVM) SetLogSources(ctx context.Context) error {
 		}
 		err := uvm.gc.ModifyServiceSettings(ctx, prot.LogForwardService, req)
 		if err != nil {
+			log.G(ctx).WithError(err).Error("Failed to set log sources")
 			return err
 		}
+		log.G(ctx).Info("Log sources configured successfully in guest")
+	} else {
+		log.G(ctx).Warn("Log forwarding not supported by guest - skipping SetLogSources")
 	}
 	return nil
 }

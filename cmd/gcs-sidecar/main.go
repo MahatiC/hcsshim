@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"time"
@@ -145,6 +146,7 @@ func main() {
 	defer logFileHandle.Close()
 
 	logrus.AddHook(shimlog.NewHook())
+	logrus.SetOutput(logFileHandle)
 
 	level, err := logrus.ParseLevel(*logLevel)
 	if err != nil {
@@ -153,6 +155,8 @@ func main() {
 	logrus.SetLevel(level)
 	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
 	trace.RegisterExporter(&oc.LogrusExporter{})
+
+	logrus.Info("gcs-sidecar starting up...")
 
 	if err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(logFileHandle.Fd())); err != nil {
 		logrus.WithError(err).Error("error redirecting handle")
@@ -216,6 +220,65 @@ func main() {
 		logrus.WithError(err).Error("error dialing hcsshim external bridge")
 		return
 	}
+
+	// 2.5. Setup log forwarding proxy - listen for inbox GCS log connections and proxy to host
+	logProxyListener, err := winio.ListenHvsock(&winio.HvsockAddr{
+		VMID:      prot.HvGUIDLoopback,
+		ServiceID: prot.WindowsLoggingHvsockServiceID,
+	})
+	if err != nil {
+		logrus.WithError(err).Error("error starting log forwarding listener")
+		return
+	}
+
+	// Start goroutine to accept log forwarding connections from inbox GCS and proxy to host
+	go func() {
+		for {
+			logrus.Info("Waiting for inbox GCS log forwarding connection...")
+			inboxConn, err := logProxyListener.Accept()
+			if err != nil {
+				logrus.WithError(err).Error("error accepting inbox GCS log connection")
+				return
+			}
+			logrus.Info("Inbox GCS log forwarding connection accepted, connecting to host...")
+
+			// Connect to host's log listener
+			hostLogConn, err := winio.Dial(context.Background(), &winio.HvsockAddr{
+				VMID:      prot.HvGUIDParent,
+				ServiceID: prot.WindowsLoggingHvsockServiceID,
+			})
+			if err != nil {
+				logrus.WithError(err).Error("error connecting to host log listener")
+				inboxConn.Close()
+				continue
+			}
+			logrus.Info("Connected to host log listener, starting bidirectional proxy...")
+
+			// Proxy data bidirectionally
+			go func() {
+				defer inboxConn.Close()
+				defer hostLogConn.Close()
+
+				// Copy inbox GCS -> host
+				errChan := make(chan error, 2)
+				go func() {
+					_, err := io.Copy(hostLogConn, inboxConn)
+					errChan <- err
+				}()
+				// Copy host -> inbox GCS
+				go func() {
+					_, err := io.Copy(inboxConn, hostLogConn)
+					errChan <- err
+				}()
+
+				err := <-errChan
+				if err != nil {
+					logrus.WithError(err).Debug("log proxy connection closed")
+				}
+				logrus.Info("Log forwarding proxy connection ended")
+			}()
+		}
+	}()
 
 	if err := amdsevsnp.StartPSPDriver(ctx); err != nil {
 		// When error happens, pspdriver.GetPspDriverError() returns true.

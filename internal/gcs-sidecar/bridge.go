@@ -167,6 +167,7 @@ func (b *Bridge) AssignHandlers() {
 	b.HandleFunc(prot.RPCResizeConsole, b.resizeConsole)
 	b.HandleFunc(prot.RPCGetProperties, b.getProperties)
 	b.HandleFunc(prot.RPCModifySettings, b.modifySettings)
+	b.HandleFunc(prot.RPCModifyServiceSettings, b.modifyServiceSettings)
 	b.HandleFunc(prot.RPCNegotiateProtocol, b.negotiateProtocol)
 	b.HandleFunc(prot.RPCDumpStacks, b.dumpStacks)
 	b.HandleFunc(prot.RPCDeleteContainerState, b.deleteContainerState)

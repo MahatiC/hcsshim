@@ -586,6 +586,7 @@ func CreateWCOW(ctx context.Context, opts *OptionsWCOW) (_ *UtilityVM, err error
 	}
 
 	if opts.ForwardLogs {
+		log.G(ctx).Debug("Setting output handler")
 		// Create a socket that the executed program can send to. This is usually
 		// used by Log Forward Service to send log data.
 		uvm.outputHandler = opts.OutputHandlerCreator(opts.Options)

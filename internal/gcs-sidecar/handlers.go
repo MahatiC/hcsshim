@@ -479,6 +479,25 @@ func (b *Bridge) updateContainer(req *request) (err error) {
 	return nil
 }
 
+func (b *Bridge) modifyServiceSettings(req *request) (err error) {
+	ctx, span := oc.StartSpan(req.ctx, "sidecar::modifyServiceSettings")
+	defer span.End()
+	defer func() { oc.SetSpanStatus(span, err) }()
+
+	log.G(ctx).Tracef("modifyServiceSettings: MsgType: %v, Payload: %v", req.header.Type, string(req.message))
+
+	var r prot.ServiceModificationRequest
+	if err := commonutils.UnmarshalJSONWithHresult(req.message, &r); err != nil {
+		return fmt.Errorf("failed to unmarshal modifyServiceSettings: %w", err)
+	}
+
+	log.G(ctx).Tracef("modifyServiceSettings: PropertyType=%v, Settings=%v", r.PropertyType, r.Settings)
+
+	// Forward service requests directly to GCS without policy enforcement for now
+	b.forwardRequestToGcs(req)
+	return nil
+}
+
 func (b *Bridge) lifecycleNotification(req *request) (err error) {
 	_, span := oc.StartSpan(req.ctx, "sidecar::lifecycleNotification")
 	defer span.End()
@@ -495,10 +514,23 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 	defer func() { oc.SetSpanStatus(span, err) }()
 
 	log.G(ctx).Tracef("modifySettings: MsgType: %v, Payload: %v", req.header.Type, string(req.message))
-	modifyRequest, err := unmarshalContainerModifySettings(req)
+	modifyRequest, isServiceRequest, err := unmarshalContainerModifySettings(req)
 	if err != nil {
 		return err
 	}
+
+	// Handle service-level requests (LogForwardService)
+	if isServiceRequest {
+		serviceRequest := modifyRequest.Request.(*guestrequest.LogForwardServiceRPCRequest)
+		log.G(ctx).Tracef("modifySettings: service request: RPCType=%v, Settings=%v", serviceRequest.RPCType, serviceRequest.Settings)
+
+		// Forward service requests directly to GCS without policy enforcement
+		// Log forwarding configuration doesn't pose a security risk
+		b.forwardRequestToGcs(req)
+		return nil
+	}
+
+	// Continue with existing resource-level modification handling
 	modifyGuestSettingsRequest := modifyRequest.Request.(*guestrequest.ModificationRequest)
 	guestResourceType := modifyGuestSettingsRequest.ResourceType
 	guestRequestType := modifyGuestSettingsRequest.RequestType
