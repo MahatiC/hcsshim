@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/Microsoft/hcsshim/internal/guestpath"
+	hcsschema "github.com/Microsoft/hcsshim/internal/hcs/schema2"
 	"github.com/Microsoft/hcsshim/internal/log"
 	rpi "github.com/Microsoft/hcsshim/internal/regopolicyinterpreter"
 	oci "github.com/opencontainers/runtime-spec/specs-go"
@@ -1068,6 +1069,97 @@ func (policy *regoEnforcer) EnforceVerifiedCIMsPolicy(ctx context.Context, conta
 
 	_, err := policy.enforce(ctx, "mount_cims", input)
 	return err
+}
+
+func (policy *regoEnforcer) EnforceRegistryChangesPolicy(ctx context.Context, containerID string, registryValues interface{}) (interface{}, error) {
+	log.G(ctx).Trace("Enforcing registry changes policy")
+
+	// Import the schema type for proper conversion
+	regChanges, ok := registryValues.(*hcsschema.RegistryChanges)
+	if !ok {
+		log.G(ctx).Warn("Input registry values are not of expected type")
+		return nil, errors.New("invalid registry values type")
+	}
+
+	input := inputData{
+		"containerID":     containerID,
+		"registryChanges": regChanges,
+	}
+
+	results, err := policy.enforce(ctx, "validate_registry_changes", input)
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("Registry changes denied by policy")
+		return nil, err
+	}
+
+	// Check if registry changes should be allowed
+	allowed, err := results.Bool("allow_registry_changes")
+	if err != nil || !allowed {
+		log.G(ctx).Warn("Registry changes not allowed or error checking policy")
+		return nil, nil
+	}
+
+	// Return the validated registry changes from policy
+	validatedChangesRaw, err := results.Value("validated_changes")
+	if err != nil {
+		log.G(ctx).WithError(err).Debug("No validated_changes in policy result, stripping all registry changes")
+		return nil, nil
+	}
+
+	// Convert the map result back to RegistryChanges struct
+	if validatedMap, ok := validatedChangesRaw.(map[string]interface{}); ok {
+		result := &hcsschema.RegistryChanges{}
+
+		if addValues, ok := validatedMap["AddValues"].([]interface{}); ok && len(addValues) > 0 {
+			result.AddValues = make([]hcsschema.RegistryValue, 0, len(addValues))
+
+			for _, val := range addValues {
+				if valMap, ok := val.(map[string]interface{}); ok {
+					regVal := hcsschema.RegistryValue{}
+
+					// Extract Key
+					if keyMap, ok := valMap["Key"].(map[string]interface{}); ok {
+						regVal.Key = &hcsschema.RegistryKey{}
+						if hive, ok := keyMap["Hive"].(string); ok {
+							regVal.Key.Hive = hcsschema.RegistryHive(hive)
+						}
+						if name, ok := keyMap["Name"].(string); ok {
+							regVal.Key.Name = name
+						}
+					}
+
+					// Extract Name, Type, and Values
+					if name, ok := valMap["Name"].(string); ok {
+						regVal.Name = name
+					}
+					if typeStr, ok := valMap["Type_"].(string); ok {
+						regVal.Type_ = hcsschema.RegistryValueType(typeStr)
+					}
+					if strVal, ok := valMap["StringValue"].(string); ok {
+						regVal.StringValue = strVal
+					}
+					if dwordVal, ok := valMap["DWordValue"].(float64); ok {
+						regVal.DWordValue = int32(dwordVal)
+					}
+					if qwordVal, ok := valMap["QWordValue"].(float64); ok {
+						regVal.QWordValue = int32(qwordVal)
+					}
+
+					result.AddValues = append(result.AddValues, regVal)
+				}
+			}
+
+			log.G(ctx).Debugf("Filtered registry changes: kept %d out of %d values", len(result.AddValues), len(regChanges.AddValues))
+			return result, nil
+		}
+
+		// Empty result means no matching values
+		log.G(ctx).Info("No registry values matched policy, stripping all")
+		return nil, nil
+	}
+
+	log.G(ctx).Warn("Unexpected validated_changes format from policy")
+	return nil, nil
 }
 
 func (policy *regoEnforcer) GetUserInfo(process *oci.Process, rootPath string) (IDName, []IDName, string, error) {

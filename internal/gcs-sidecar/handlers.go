@@ -81,6 +81,28 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		containerID := createContainerRequest.ContainerID
 		log.G(ctx).Tracef("rpcCreate: CWCOWHostedSystemConfig {spec: %v, schemaVersion: %v, container: %v}}", string(req.message), schemaVersion, container)
 
+		// Enforce registry changes policy
+		if container != nil && container.RegistryChanges != nil {
+			log.G(ctx).Trace("Container has registry changes, validating against policy")
+			validatedChanges, err := b.hostState.securityOptions.PolicyEnforcer.EnforceRegistryChangesPolicy(ctx, containerID, container.RegistryChanges)
+			if err != nil {
+				log.G(ctx).WithError(err).Warn("Registry changes validation failed, stripping registry changes")
+				container.RegistryChanges = nil
+			} else if validatedChanges == nil {
+				log.G(ctx).Info("Registry changes not allowed by policy, stripping registry changes")
+				container.RegistryChanges = nil
+			} else {
+				log.G(ctx).Trace("Registry changes validated successfully")
+				// Type assert back to *hcsschema.RegistryChanges
+				if regChanges, ok := validatedChanges.(*hcsschema.RegistryChanges); ok {
+					container.RegistryChanges = regChanges
+				} else {
+					log.G(ctx).Warn("Unexpected type for validated registry changes, stripping")
+					container.RegistryChanges = nil
+				}
+			}
+		}
+
 		user := securitypolicy.IDName{
 			Name: spec.Process.User.Username,
 		}
