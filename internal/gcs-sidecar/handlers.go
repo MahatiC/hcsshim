@@ -84,22 +84,51 @@ func (b *Bridge) createContainer(req *request) (err error) {
 		// Enforce registry changes policy
 		if container != nil && container.RegistryChanges != nil {
 			log.G(ctx).Trace("Container has registry changes, validating against policy")
-			validatedChanges, err := b.hostState.securityOptions.PolicyEnforcer.EnforceRegistryChangesPolicy(ctx, containerID, container.RegistryChanges)
-			if err != nil {
-				log.G(ctx).WithError(err).Warn("Registry changes validation failed, stripping registry changes")
-				container.RegistryChanges = nil
-			} else if validatedChanges == nil {
-				log.G(ctx).Info("Registry changes not allowed by policy, stripping registry changes")
-				container.RegistryChanges = nil
-			} else {
-				log.G(ctx).Trace("Registry changes validated successfully")
-				// Type assert back to *hcsschema.RegistryChanges
-				if regChanges, ok := validatedChanges.(*hcsschema.RegistryChanges); ok {
-					container.RegistryChanges = regChanges
-				} else {
-					log.G(ctx).Warn("Unexpected type for validated registry changes, stripping")
-					container.RegistryChanges = nil
+
+			// First, separate default values from non-default values
+			var defaultValues []hcsschema.RegistryValue
+			var nonDefaultValues []hcsschema.RegistryValue
+
+			if container.RegistryChanges.AddValues != nil {
+				for _, value := range container.RegistryChanges.AddValues {
+					if isDefaultRegistryValue(value) {
+						defaultValues = append(defaultValues, value)
+						log.G(ctx).WithField("name", value.Name).Trace("Registry value matches default, accepting without policy check")
+					} else {
+						nonDefaultValues = append(nonDefaultValues, value)
+					}
 				}
+			}
+
+			// If there are non-default values, validate them against policy
+			var validatedNonDefaults []hcsschema.RegistryValue
+			if len(nonDefaultValues) > 0 {
+				log.G(ctx).Tracef("Validating %d non-default registry values against policy", len(nonDefaultValues))
+
+				nonDefaultChanges := &hcsschema.RegistryChanges{
+					AddValues: nonDefaultValues,
+				}
+
+				validatedChanges, err := b.hostState.securityOptions.PolicyEnforcer.EnforceRegistryChangesPolicy(ctx, containerID, nonDefaultChanges)
+				if err != nil {
+					log.G(ctx).WithError(err).Warn("Registry changes validation failed for non-default values")
+				} else if validatedChanges != nil {
+					if regChanges, ok := validatedChanges.(*hcsschema.RegistryChanges); ok && regChanges.AddValues != nil {
+						validatedNonDefaults = regChanges.AddValues
+						log.G(ctx).Tracef("Policy validated %d out of %d non-default values", len(validatedNonDefaults), len(nonDefaultValues))
+					}
+				}
+			}
+
+			// Combine default values with validated non-default values
+			finalValues := append(defaultValues, validatedNonDefaults...)
+			if len(finalValues) > 0 {
+				container.RegistryChanges.AddValues = finalValues
+				log.G(ctx).Infof("Final registry changes: %d values (%d defaults + %d policy-validated)",
+					len(finalValues), len(defaultValues), len(validatedNonDefaults))
+			} else {
+				log.G(ctx).Info("No registry values passed validation, stripping registry changes")
+				container.RegistryChanges = nil
 			}
 		}
 
