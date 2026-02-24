@@ -2096,6 +2096,10 @@ default validate_registry_changes := {"allow_registry_changes": false, "validate
 registry_keys_match(policy_key, input_key) {
     policy_key.hive == input_key.Hive
     policy_key.name == input_key.Name
+    # Volatile field comparison (default to false if not specified)
+    policy_volatile := object.get(policy_key, "volatile", false)
+    input_volatile := object.get(input_key, "Volatile", false)
+    policy_volatile == input_volatile
 }
 
 # Helper function to compare registry values
@@ -2124,6 +2128,16 @@ registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
     policy_value.type == input_value.Type_
+    policy_value.binary_value == input_value.BinaryValue
+}
+
+# CustomType match - both CustomType field and BinaryValue must match
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.type == "CUSTOM_TYPE"
+    policy_value.custom_type == input_value.CustomType
     policy_value.binary_value == input_value.BinaryValue
 }
 

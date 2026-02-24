@@ -71,6 +71,9 @@ func registryValuesMatch(a, b hcsschema.RegistryValue) bool {
 		return a.QWordValue == b.QWordValue
 	case hcsschema.RegistryValueType_BINARY:
 		return a.BinaryValue == b.BinaryValue
+	case hcsschema.RegistryValueType_CUSTOM_TYPE:
+		// For CustomType, both CustomType field and BinaryValue must match
+		return a.CustomType == b.CustomType && a.BinaryValue == b.BinaryValue
 	default:
 		return false
 	}
@@ -84,5 +87,5 @@ func registryKeysMatch(a, b *hcsschema.RegistryKey) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	return a.Hive == b.Hive && a.Name == b.Name
+	return a.Hive == b.Hive && a.Name == b.Name && a.Volatile == b.Volatile
 }
