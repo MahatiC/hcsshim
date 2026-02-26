@@ -1231,6 +1231,91 @@ scratch_unmount := {"metadata": [remove_scratch_mount], "allowed": true} {
     }
 }
 
+# Registry changes validation
+default validate_registry_changes := {"allowed": false}
+
+# Helper function to compare registry keys
+registry_keys_match(policy_key, input_key) {
+    policy_key.hive == input_key.Hive
+    policy_key.name == input_key.Name
+    # Volatile field comparison (default to false if not specified)
+    policy_volatile := object.get(policy_key, "volatile", false)
+    input_volatile := object.get(input_key, "Volatile", false)
+    policy_volatile == input_volatile
+}
+
+# Helper function to compare registry values
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.string_value == input_value.StringValue
+}
+
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.dword_value == input_value.DWordValue
+}
+
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.qword_value == input_value.QWordValue
+}
+
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.binary_value == input_value.BinaryValue
+}
+
+# CustomType match - both CustomType field and BinaryValue must match
+registry_value_matches(policy_value, input_value) {
+    registry_keys_match(policy_value.key, input_value.Key)
+    policy_value.name == input_value.Name
+    policy_value.type == input_value.Type_
+    policy_value.type == "CUSTOM_TYPE"
+    policy_value.custom_type == input_value.CustomType
+    policy_value.binary_value == input_value.BinaryValue
+}
+
+# Filter input registry values to only include those that match policy
+filtered_registry_values(input_values, policy_values) := [input_val |
+    input_val := input_values[_]
+    some policy_val in policy_values
+    registry_value_matches(policy_val, input_val)
+]
+
+validate_registry_changes := {"allowed": true, "validated_changes": result} {
+    containers := data.metadata.matches[input.containerID]
+    container := containers[_]
+    
+    # Check if container has registry_changes defined in policy
+    container.registry_changes
+    
+    # If input has registry changes, filter to only matching ones
+    input.registryChanges.AddValues
+    matched_values := filtered_registry_values(input.registryChanges.AddValues, container.registry_changes.add_values)
+    
+    # Build result with filtered AddValues
+    result := {
+        "AddValues": matched_values
+    }
+}
+
+# If policy container has no registry changes and input has none, allow
+validate_registry_changes := {"allowed": true} {
+    containers := data.metadata.matches[input.containerID]
+    container := containers[_]
+    
+    not container.registry_changes
+    not input.registryChanges.AddValues
+}
+
 reason := {
     "errors": errors,
     "error_objects": error_objects
@@ -2087,91 +2172,6 @@ default allow_capability_dropping := false
 allow_capability_dropping := flag {
     semver.compare(policy_framework_version, "0.2.2") >= 0
     flag := data.policy.allow_capability_dropping
-}
-
-# Registry changes validation
-default validate_registry_changes := {"allow_registry_changes": false, "validated_changes": null}
-
-# Helper function to compare registry keys
-registry_keys_match(policy_key, input_key) {
-    policy_key.hive == input_key.Hive
-    policy_key.name == input_key.Name
-    # Volatile field comparison (default to false if not specified)
-    policy_volatile := object.get(policy_key, "volatile", false)
-    input_volatile := object.get(input_key, "Volatile", false)
-    policy_volatile == input_volatile
-}
-
-# Helper function to compare registry values
-registry_value_matches(policy_value, input_value) {
-    registry_keys_match(policy_value.key, input_value.Key)
-    policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.string_value == input_value.StringValue
-}
-
-registry_value_matches(policy_value, input_value) {
-    registry_keys_match(policy_value.key, input_value.Key)
-    policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.dword_value == input_value.DWordValue
-}
-
-registry_value_matches(policy_value, input_value) {
-    registry_keys_match(policy_value.key, input_value.Key)
-    policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.qword_value == input_value.QWordValue
-}
-
-registry_value_matches(policy_value, input_value) {
-    registry_keys_match(policy_value.key, input_value.Key)
-    policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.binary_value == input_value.BinaryValue
-}
-
-# CustomType match - both CustomType field and BinaryValue must match
-registry_value_matches(policy_value, input_value) {
-    registry_keys_match(policy_value.key, input_value.Key)
-    policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.type == "CUSTOM_TYPE"
-    policy_value.custom_type == input_value.CustomType
-    policy_value.binary_value == input_value.BinaryValue
-}
-
-# Filter input registry values to only include those that match policy
-filtered_registry_values(input_values, policy_values) := [input_val |
-    input_val := input_values[_]
-    some policy_val in policy_values
-    registry_value_matches(policy_val, input_val)
-]
-
-validate_registry_changes := {"allow_registry_changes": true, "validated_changes": result} {
-    containers := data.metadata.matches[input.containerID]
-    container := containers[_]
-    
-    # Check if container has registry_changes defined in policy
-    container.registry_changes
-    
-    # If input has registry changes, filter to only matching ones
-    input.registryChanges.AddValues
-    matched_values := filtered_registry_values(input.registryChanges.AddValues, container.registry_changes.add_values)
-    
-    # Build result with filtered AddValues
-    result := {
-        "AddValues": matched_values
-    }
-}
-
-# If policy container has no registry changes and input has none, allow
-validate_registry_changes := {"allow_registry_changes": true, "validated_changes": null} {
-    containers := data.metadata.matches[input.containerID]
-    container := containers[_]
-    
-    not container.registry_changes
-    not input.registryChanges.AddValues
 }
 
 default policy_framework_version := null

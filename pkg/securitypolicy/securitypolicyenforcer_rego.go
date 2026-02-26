@@ -1092,13 +1092,6 @@ func (policy *regoEnforcer) EnforceRegistryChangesPolicy(ctx context.Context, co
 		return nil, err
 	}
 
-	// Check if registry changes should be allowed
-	allowed, err := results.Bool("allow_registry_changes")
-	if err != nil || !allowed {
-		log.G(ctx).Warn("Registry changes not allowed or error checking policy")
-		return nil, nil
-	}
-
 	// Return the validated registry changes from policy
 	validatedChangesRaw, err := results.Value("validated_changes")
 	if err != nil {
