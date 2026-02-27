@@ -105,7 +105,7 @@ func writeIntegrityChecksumInfoFile(ctx context.Context, blockPath string) error
 		return fmt.Errorf("failed to query verified info of the CIM layer: %w", err)
 	}
 
-	digestFile, err := os.Create(filepath.Join(filepath.Dir(blockPath), "integrity_checksum"))
+	digestFile, err := os.Create(filepath.Join(filepath.Dir(blockPath), "integrity_checksum_info"))
 	if err != nil {
 		return fmt.Errorf("failed to create verification info file: %w", err)
 	}

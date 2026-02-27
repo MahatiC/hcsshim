@@ -1249,8 +1249,8 @@ registry_keys_match(policy_key, input_key) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
-    policy_value.type == "STRING"
+    policy_value.type == input_value.Type
+    policy_value.type == "String"
     policy_value.string_value == input_value.StringValue
 }
 
@@ -1258,7 +1258,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "EXPANDED_STRING"
     policy_value.string_value == input_value.StringValue
 }
@@ -1267,7 +1267,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "MULTI_STRING"
     policy_value.string_value == input_value.StringValue
 }
@@ -1276,7 +1276,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "D_WORD"
     policy_value.dword_value == input_value.DWordValue
 }
@@ -1285,7 +1285,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "Q_WORD"
     policy_value.qword_value == input_value.QWordValue
 }
@@ -1294,7 +1294,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "BINARY"
     policy_value.binary_value == input_value.BinaryValue
 }
@@ -1303,7 +1303,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "CUSTOM_TYPE"
     policy_value.custom_type == input_value.CustomType
     policy_value.binary_value == input_value.BinaryValue
@@ -1313,7 +1313,7 @@ registry_value_matches(policy_value, input_value) {
 registry_value_matches(policy_value, input_value) {
     registry_keys_match(policy_value.key, input_value.Key)
     policy_value.name == input_value.Name
-    policy_value.type == input_value.Type_
+    policy_value.type == input_value.Type
     policy_value.type == "NONE"
 }
 
