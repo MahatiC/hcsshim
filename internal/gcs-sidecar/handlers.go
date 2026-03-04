@@ -682,9 +682,9 @@ func (b *Bridge) modifySettings(req *request) (err error) {
 
 				// skip the merged cim and verify individual layer hashes
 				hashesToVerify := layerHashes
-				if len(layerHashes) > 1 {
+				/*if len(layerHashes) > 1 {
 					hashesToVerify = layerHashes[1:]
-				}
+				}*/
 
 				err := b.hostState.securityOptions.PolicyEnforcer.EnforceVerifiedCIMsPolicy(req.ctx, containerID, hashesToVerify)
 				if err != nil {
