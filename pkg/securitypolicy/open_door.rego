@@ -23,3 +23,4 @@ runtime_logging := {"allowed": true}
 load_fragment := {"allowed": true}
 scratch_mount := {"allowed": true}
 scratch_unmount := {"allowed": true}
+unmount_cims := {"allowed": true}

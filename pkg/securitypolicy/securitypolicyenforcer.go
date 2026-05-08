@@ -126,7 +126,8 @@ type SecurityPolicyEnforcer interface {
 	EnforceScratchMountPolicy(ctx context.Context, scratchPath string, encrypted bool) (err error)
 	EnforceScratchUnmountPolicy(ctx context.Context, scratchPath string) (err error)
 	GetUserInfo(spec *oci.Process, rootPath string) (IDName, []IDName, string, error)
-	EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string) (err error)
+	EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string, volumeGUID string) (err error)
+	EnforceCIMUnmountPolicy(ctx context.Context, volumeGUID string) (err error)
 	EnforceRegistryChangesPolicy(ctx context.Context, containerID string, registryValues interface{}) error
 }
 
@@ -316,7 +317,11 @@ func (OpenDoorSecurityPolicyEnforcer) GetUserInfo(spec *oci.Process, rootPath st
 	return IDName{}, nil, "", nil
 }
 
-func (OpenDoorSecurityPolicyEnforcer) EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string) error {
+func (OpenDoorSecurityPolicyEnforcer) EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string, volumeGUID string) error {
+	return nil
+}
+
+func (OpenDoorSecurityPolicyEnforcer) EnforceCIMUnmountPolicy(ctx context.Context, volumeGUID string) error {
 	return nil
 }
 
@@ -445,8 +450,12 @@ func (ClosedDoorSecurityPolicyEnforcer) GetUserInfo(spec *oci.Process, rootPath 
 	return IDName{}, nil, "", nil
 }
 
-func (ClosedDoorSecurityPolicyEnforcer) EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string) error {
+func (ClosedDoorSecurityPolicyEnforcer) EnforceVerifiedCIMsPolicy(ctx context.Context, containerID string, layerHashes []string, mountedCim []string, volumeGUID string) error {
 	return nil
+}
+
+func (ClosedDoorSecurityPolicyEnforcer) EnforceCIMUnmountPolicy(ctx context.Context, volumeGUID string) error {
+	return errors.New("CIM unmounting is denied by policy")
 }
 
 func (ClosedDoorSecurityPolicyEnforcer) EnforceRegistryChangesPolicy(ctx context.Context, containerID string, registryValues interface{}) error {
