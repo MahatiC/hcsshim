@@ -168,7 +168,7 @@ candidate_containers := containers {
 
 default mount_cims := {"allowed": false}
 
-mount_cims := {"metadata": [addMatches], "allowed": true} {
+mount_cims := {"metadata": array.concat([addMatches], volumeOps), "allowed": true} {
     not overlay_exists
 
     containers := [container |
@@ -183,6 +183,34 @@ mount_cims := {"metadata": [addMatches], "allowed": true} {
         "action": "add",
         "key": input.containerID,
         "value": containers,
+    }
+
+    # Track the volume GUID if provided. Use "update" so repeated mounts
+    # of the same volume (container reuse) are idempotent.
+    volumeOps := [op |
+        input.volumeGUID
+        input.volumeGUID != ""
+        op := {
+            "name": "mountedCimVolumes",
+            "action": "update",
+            "key": input.volumeGUID,
+            "value": true,
+        }
+    ]
+}
+
+cim_volume_mounted(volumeGUID) {
+    data.metadata.mountedCimVolumes[volumeGUID]
+}
+
+default unmount_cims := {"allowed": false}
+
+unmount_cims := {"metadata": [removeCimVolume], "allowed": true} {
+    cim_volume_mounted(input.volumeGUID)
+    removeCimVolume := {
+        "name": "mountedCimVolumes",
+        "action": "remove",
+        "key": input.volumeGUID,
     }
 }
 
@@ -1869,6 +1897,11 @@ errors["writable mapped directory not allowed"] {
 errors["no mapped directory at path to unmount"] {
     input.rule == "mapped_directory_unmount"
     not mapped_directory_mounted(input.unmountTarget)
+}
+
+errors["no CIM volume at GUID to unmount"] {
+    input.rule == "unmount_cims"
+    not cim_volume_mounted(input.volumeGUID)
 }
 
 errors[framework_version_error] {

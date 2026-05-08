@@ -353,7 +353,7 @@ func Test_Rego_EnforceVerifiedCIMSPolicy_Multiple_Instances_Same_Container(t *te
 			// The runtime sends individual layers as hashesToVerify
 			// and the merged CIM hash separately
 			id := testDataGenerator.uniqueContainerID()
-			err = policy.EnforceVerifiedCIMsPolicy(constraints.ctx, id, layerHashes, container.MountedCim)
+			err = policy.EnforceVerifiedCIMsPolicy(constraints.ctx, id, layerHashes, container.MountedCim, "")
 			if err != nil {
 				t.Fatalf("failed with %d containers", containersToCreate)
 			}
@@ -1692,5 +1692,140 @@ func Test_Rego_EnforceMappedDirectoryMountPolicy_OpenDoor_AllowsAll_Windows(t *t
 	err = policy.EnforceMappedDirectoryMountPolicy(ctx, `C:\writable`, false)
 	if err != nil {
 		t.Errorf("open door should allow writable mount: %v", err)
+	}
+}
+
+func Test_Rego_EnforceCIMUnmountPolicy_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		securityPolicy := p.toPolicy()
+		policy, err := newRegoPolicy(
+			securityPolicy.marshalWindowsRego(),
+			[]oci.Mount{},
+			[]oci.Mount{},
+			testOSType,
+		)
+		if err != nil {
+			t.Errorf("failed to create policy: %v", err)
+			return false
+		}
+
+		ctx := context.Background()
+		volumeGUID := "12345678-1234-1234-1234-123456789abc"
+
+		if len(p.containers) == 0 {
+			return true
+		}
+
+		container := p.containers[0]
+		layerHashes := make([]string, len(container.Layers))
+		for i, layer := range container.Layers {
+			layerHashes[len(container.Layers)-1-i] = layer
+		}
+
+		id := testDataGenerator.uniqueContainerID()
+		err = policy.EnforceVerifiedCIMsPolicy(ctx, id, layerHashes, container.MountedCim, volumeGUID)
+		if err != nil {
+			t.Errorf("mount should succeed: %v", err)
+			return false
+		}
+
+		// Unmount should succeed
+		err = policy.EnforceCIMUnmountPolicy(ctx, volumeGUID)
+		if err != nil {
+			t.Errorf("unmount should succeed: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 5, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_EnforceCIMUnmountPolicy_Windows: %v", err)
+	}
+}
+
+func Test_Rego_EnforceCIMUnmountPolicy_NotMounted_Denied_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		securityPolicy := p.toPolicy()
+		policy, err := newRegoPolicy(
+			securityPolicy.marshalWindowsRego(),
+			[]oci.Mount{},
+			[]oci.Mount{},
+			testOSType,
+		)
+		if err != nil {
+			t.Errorf("failed to create policy: %v", err)
+			return false
+		}
+
+		ctx := context.Background()
+		// Unmount without mounting should fail
+		err = policy.EnforceCIMUnmountPolicy(ctx, "nonexistent-guid")
+		if err == nil {
+			t.Errorf("unmount of non-mounted CIM should be denied")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 5, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_EnforceCIMUnmountPolicy_NotMounted_Denied_Windows: %v", err)
+	}
+}
+
+func Test_Rego_EnforceCIMUnmountPolicy_DoubleUnmount_Denied_Windows(t *testing.T) {
+	f := func(p *generatedWindowsConstraints) bool {
+		securityPolicy := p.toPolicy()
+		policy, err := newRegoPolicy(
+			securityPolicy.marshalWindowsRego(),
+			[]oci.Mount{},
+			[]oci.Mount{},
+			testOSType,
+		)
+		if err != nil {
+			t.Errorf("failed to create policy: %v", err)
+			return false
+		}
+
+		ctx := context.Background()
+		volumeGUID := "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+
+		if len(p.containers) == 0 {
+			return true
+		}
+
+		container := p.containers[0]
+		layerHashes := make([]string, len(container.Layers))
+		for i, layer := range container.Layers {
+			layerHashes[len(container.Layers)-1-i] = layer
+		}
+
+		id := testDataGenerator.uniqueContainerID()
+		err = policy.EnforceVerifiedCIMsPolicy(ctx, id, layerHashes, container.MountedCim, volumeGUID)
+		if err != nil {
+			t.Errorf("mount should succeed: %v", err)
+			return false
+		}
+
+		// First unmount should succeed
+		err = policy.EnforceCIMUnmountPolicy(ctx, volumeGUID)
+		if err != nil {
+			t.Errorf("first unmount should succeed: %v", err)
+			return false
+		}
+
+		// Second unmount should fail (already removed)
+		err = policy.EnforceCIMUnmountPolicy(ctx, volumeGUID)
+		if err == nil {
+			t.Errorf("double unmount should be denied")
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(f, &quick.Config{MaxCount: 5, Rand: testRand}); err != nil {
+		t.Errorf("Test_Rego_EnforceCIMUnmountPolicy_DoubleUnmount_Denied_Windows: %v", err)
 	}
 }
