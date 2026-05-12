@@ -36,6 +36,7 @@ type Container struct {
 	processes       map[uint32]*containerProcess
 	commandLine     bool
 	commandLineExec bool
+	allowStdio      bool
 }
 
 // Process is a struct that defines the lifetime and operations associated with
